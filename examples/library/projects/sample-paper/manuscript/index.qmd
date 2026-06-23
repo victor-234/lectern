@@ -1,0 +1,21 @@
+---
+title: "Scaling Attention"
+author:
+  - Ada Lovelace
+  - Alan Turing
+bibliography: ../../../.lectern/references.bib
+format:
+  pdf:
+    documentclass: article
+    number-sections: true
+  html:
+    toc: true
+---
+
+<!-- lectern:sections:begin -->
+{{< include sections/00-abstract.qmd >}}
+{{< include sections/01-introduction.qmd >}}
+{{< include sections/02-methods.qmd >}}
+{{< include sections/03-results.qmd >}}
+{{< include sections/99-references.qmd >}}
+<!-- lectern:sections:end -->

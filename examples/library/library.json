@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "papers": [
+    {
+      "id": "vaswani2017",
+      "citekey": "vaswani2017",
+      "title": "vaswani2017",
+      "authors": [],
+      "year": "2017",
+      "path": ".sources/vaswani2017.pdf"
+    },
+    {
+      "id": "kaplan2020",
+      "citekey": "kaplan2020",
+      "title": "kaplan2020",
+      "authors": [],
+      "year": "2020",
+      "path": ".sources/kaplan2020.pdf"
+    },
+    {
+      "id": "hinton2012-dropout",
+      "citekey": "hinton2012-dropout",
+      "title": "hinton2012 dropout",
+      "authors": [],
+      "year": "2012",
+      "path": ".sources/hinton2012-dropout.pdf"
+    }
+  ]
+}

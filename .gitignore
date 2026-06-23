@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+release/
+# Legacy Supabase pull scratch — regenerate locally via scripts/pull-from-supabase.mjs
+data/
+# Personal one-off data-migration scripts (hardcoded local paths, undeclared deps).
+# Kept locally but not published; `git add -f scripts/` to include them.
+scripts/
+# electron-vite occasionally drops a timestamped temp config next to the real one.
+electron.vite.config.*.mjs
+*.log
+.DS_Store

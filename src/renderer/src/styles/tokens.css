@@ -1,0 +1,365 @@
+/* ============================================================
+   LCTRN — Design tokens (ported from the "lectron" design
+   system: claude.ai/design handoff bundle).
+   Colors · Typography · Spacing/radii/motion · Base defaults.
+   Dual-mode: light is the reading/writing surface, dark is the
+   IDE / database / terminal surface. Toggle with
+   [data-theme="dark"|"light"] on <html>; falls back to OS.
+   ============================================================ */
+
+/* ---- Webfonts ---------------------------------------------------------------
+   JetBrains Mono : data, UI labels, tables, terminal, code
+   IBM Plex Sans  : reading & writing surface, UI prose
+   IBM Plex Serif : long-form paper reading (abstracts)            */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Serif:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+
+/* ============================================================
+   COLOR
+   ============================================================ */
+:root {
+  /* ---- Signal / accent (azure, identical hue both modes) ---- */
+  --accent:            oklch(0.706 0.150 250);  /* #4da5f9 */
+  --accent-hover:      oklch(0.666 0.150 250);
+  --accent-press:      oklch(0.626 0.148 250);
+  --accent-weak:       oklch(0.706 0.150 250 / 0.12);
+  --accent-line:       oklch(0.706 0.150 250 / 0.42);
+  --text-on-accent:    oklch(0.205 0.02 250);
+
+  /* ---- Categorical data-viz palette (shared, tuned per mode) -- */
+  --data-orange:       oklch(0.705 0.168 42);
+  --data-green:        oklch(0.70 0.145 158);
+  --data-blue:         oklch(0.66 0.140 245);
+  --data-cyan:         oklch(0.745 0.105 210);
+  --data-amber:        oklch(0.80 0.135 78);
+  --data-violet:       oklch(0.66 0.160 300);
+  --data-red:          oklch(0.635 0.200 25);
+  --data-pink:         oklch(0.72 0.150 350);
+
+  /* ---- Semantic status -------------------------------------- */
+  --success:           oklch(0.62 0.135 158);
+  --warning:           oklch(0.70 0.135 78);
+  --danger:            oklch(0.585 0.200 25);
+  --info:              oklch(0.60 0.140 245);
+
+  /* ============ LIGHT MODE (default) — reading surface ======== */
+  --bg-sunken:         oklch(0.955 0.003 250);
+  --bg:                oklch(0.978 0.0025 250);
+  --surface:           oklch(1 0 0);
+  --surface-raised:    oklch(1 0 0);
+  --surface-overlay:   oklch(1 0 0);
+  --surface-inset:     oklch(0.965 0.003 250);
+
+  --border-subtle:     oklch(0.925 0.003 250);
+  --border:            oklch(0.885 0.004 250);
+  --border-strong:     oklch(0.80 0.006 250);
+
+  --text:              oklch(0.235 0.012 255);
+  --text-secondary:    oklch(0.43 0.010 255);
+  --text-muted:        oklch(0.575 0.008 255);
+  --text-faint:        oklch(0.70 0.006 255);
+
+  --success-bg:        oklch(0.62 0.135 158 / 0.12);
+  --warning-bg:        oklch(0.70 0.135 78 / 0.16);
+  --danger-bg:         oklch(0.585 0.200 25 / 0.10);
+  --info-bg:           oklch(0.60 0.140 245 / 0.10);
+
+  /* selection + focus */
+  --selection:         oklch(0.706 0.150 250 / 0.22);
+  --focus-ring:        oklch(0.66 0.140 245 / 0.55);
+
+  /* terminal (a terminal is dark even in light mode) */
+  --term-bg:           oklch(0.205 0.012 258);
+  --term-chrome:       oklch(0.255 0.012 258);
+  --term-fg:           oklch(0.92 0.006 250);
+  --term-dim:          oklch(0.62 0.010 250);
+  --term-prompt:       var(--accent);
+  --term-green:        oklch(0.78 0.155 158);
+  --term-cyan:         oklch(0.80 0.105 205);
+  --term-violet:       oklch(0.74 0.150 300);
+  --term-red:          oklch(0.70 0.180 25);
+  --term-selection:    oklch(0.706 0.150 250 / 0.30);
+  --term-border:       oklch(0.34 0.012 258);
+}
+
+/* ============ DARK MODE — IDE / database surface ============== */
+:root[data-theme="dark"] {
+  --accent:            oklch(0.738 0.143 247);  /* #56b1ff */
+  --accent-hover:      oklch(0.775 0.125 243);  /* #67bfff */
+  --accent-press:      oklch(0.70 0.140 247);
+  --accent-weak:       oklch(0.738 0.143 247 / 0.16);
+  --accent-line:       oklch(0.738 0.143 247 / 0.48);
+  --text-on-accent:    oklch(0.18 0.02 247);
+
+  --data-orange:       oklch(0.735 0.170 44);
+  --data-green:        oklch(0.76 0.150 158);
+  --data-blue:         oklch(0.72 0.135 245);
+  --data-cyan:         oklch(0.80 0.100 205);
+  --data-amber:        oklch(0.83 0.130 80);
+  --data-violet:       oklch(0.74 0.150 300);
+  --data-red:          oklch(0.70 0.185 25);
+  --data-pink:         oklch(0.78 0.140 350);
+
+  --success:           oklch(0.76 0.150 158);
+  --warning:           oklch(0.83 0.130 80);
+  --danger:            oklch(0.70 0.185 25);
+  --info:              oklch(0.72 0.135 245);
+
+  --bg-sunken:         oklch(0.165 0.006 258);
+  --bg:                oklch(0.195 0.007 258);
+  --surface:           oklch(0.225 0.008 258);
+  --surface-raised:    oklch(0.255 0.009 258);
+  --surface-overlay:   oklch(0.285 0.010 258);
+  --surface-inset:     oklch(0.175 0.007 258);
+
+  --border-subtle:     oklch(0.28 0.009 258);
+  --border:            oklch(0.32 0.010 258);
+  --border-strong:     oklch(0.42 0.012 258);
+
+  --text:              oklch(0.955 0.004 250);
+  --text-secondary:    oklch(0.745 0.007 250);
+  --text-muted:        oklch(0.585 0.008 255);
+  --text-faint:        oklch(0.46 0.009 255);
+
+  --success-bg:        oklch(0.76 0.150 158 / 0.14);
+  --warning-bg:        oklch(0.83 0.130 80 / 0.14);
+  --danger-bg:         oklch(0.70 0.185 25 / 0.14);
+  --info-bg:           oklch(0.72 0.135 245 / 0.14);
+
+  --selection:         oklch(0.738 0.143 247 / 0.28);
+  --focus-ring:        oklch(0.72 0.135 245 / 0.65);
+
+  --term-bg:           oklch(0.155 0.007 258);
+  --term-chrome:       oklch(0.205 0.008 258);
+  --term-fg:           oklch(0.93 0.005 250);
+  --term-dim:          oklch(0.60 0.010 250);
+  --term-border:       oklch(0.30 0.010 258);
+}
+
+/* System-preference fallback when no explicit attribute is set */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent:            oklch(0.738 0.143 247);  /* #56b1ff */
+    --accent-hover:      oklch(0.775 0.125 243);  /* #67bfff */
+    --accent-press:      oklch(0.70 0.140 247);
+    --accent-weak:       oklch(0.738 0.143 247 / 0.16);
+    --accent-line:       oklch(0.738 0.143 247 / 0.48);
+    --text-on-accent:    oklch(0.18 0.02 247);
+
+    --data-orange:       oklch(0.735 0.170 44);
+    --data-green:        oklch(0.76 0.150 158);
+    --data-blue:         oklch(0.72 0.135 245);
+    --data-cyan:         oklch(0.80 0.100 205);
+    --data-amber:        oklch(0.83 0.130 80);
+    --data-violet:       oklch(0.74 0.150 300);
+    --data-red:          oklch(0.70 0.185 25);
+    --data-pink:         oklch(0.78 0.140 350);
+
+    --success:           oklch(0.76 0.150 158);
+    --warning:           oklch(0.83 0.130 80);
+    --danger:            oklch(0.70 0.185 25);
+    --info:              oklch(0.72 0.135 245);
+
+    --bg-sunken:         oklch(0.165 0.006 258);
+    --bg:                oklch(0.195 0.007 258);
+    --surface:          oklch(0.225 0.008 258);
+    --surface-raised:    oklch(0.255 0.009 258);
+    --surface-overlay:   oklch(0.285 0.010 258);
+    --surface-inset:     oklch(0.175 0.007 258);
+
+    --border-subtle:     oklch(0.28 0.009 258);
+    --border:            oklch(0.32 0.010 258);
+    --border-strong:     oklch(0.42 0.012 258);
+
+    --text:              oklch(0.955 0.004 250);
+    --text-secondary:    oklch(0.745 0.007 250);
+    --text-muted:        oklch(0.585 0.008 255);
+    --text-faint:        oklch(0.46 0.009 255);
+
+    --success-bg:        oklch(0.76 0.150 158 / 0.14);
+    --warning-bg:        oklch(0.83 0.130 80 / 0.14);
+    --danger-bg:         oklch(0.70 0.185 25 / 0.14);
+    --info-bg:           oklch(0.72 0.135 245 / 0.14);
+
+    --selection:         oklch(0.738 0.143 247 / 0.28);
+    --focus-ring:        oklch(0.72 0.135 245 / 0.65);
+
+    --term-bg:           oklch(0.155 0.007 258);
+    --term-chrome:       oklch(0.205 0.008 258);
+    --term-fg:           oklch(0.93 0.005 250);
+    --term-dim:          oklch(0.60 0.010 250);
+    --term-border:       oklch(0.30 0.010 258);
+  }
+}
+
+::selection { background: var(--selection); }
+
+/* ============================================================
+   TYPOGRAPHY
+   ============================================================ */
+:root {
+  /* families */
+  --font-mono:   'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-sans:   'IBM Plex Sans', system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+  --font-serif:  'IBM Plex Serif', Georgia, 'Times New Roman', serif;
+
+  /* type scale — compact, IDE-density */
+  --fs-9:   0.625rem;   /* 10 — micro labels, table sublabels */
+  --fs-10:  0.6875rem;  /* 11 — meta, kbd, badges */
+  --fs-11:  0.75rem;    /* 12 — UI default small, table cells */
+  --fs-12:  0.8125rem;  /* 13 — UI default, controls */
+  --fs-13:  0.875rem;   /* 14 — body small */
+  --fs-15:  0.9375rem;  /* 15 — reading body */
+  --fs-17:  1.0625rem;  /* 17 — reading body large */
+  --fs-20:  1.25rem;    /* 20 — section title */
+  --fs-25:  1.5625rem;  /* 25 — page title */
+  --fs-32:  2rem;       /* 32 — display */
+  --fs-44:  2.75rem;    /* 44 — hero display */
+
+  /* weights */
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semibold: 600;
+  --fw-bold:     700;
+
+  /* line-heights */
+  --lh-tight:   1.15;
+  --lh-snug:    1.3;
+  --lh-normal:  1.5;
+  --lh-reading: 1.65;
+
+  /* tracking */
+  --ls-mono-tight:  -0.01em;
+  --ls-label:        0.02em;
+  --ls-caps:         0.08em;
+
+  --ff-tabular: "tnum" 1, "cv01" 1;
+}
+
+/* ============================================================
+   SPACING · RADII · SHADOWS · MOTION · LAYOUT
+   ============================================================ */
+:root {
+  /* spacing — 4px base */
+  --sp-0:   0;
+  --sp-1:   2px;
+  --sp-2:   4px;
+  --sp-3:   6px;
+  --sp-4:   8px;
+  --sp-5:   10px;
+  --sp-6:   12px;
+  --sp-8:   16px;
+  --sp-10:  20px;
+  --sp-12:  24px;
+  --sp-16:  32px;
+  --sp-20:  40px;
+  --sp-24:  48px;
+  --sp-32:  64px;
+
+  /* radii — small, mechanical */
+  --r-xs:   3px;
+  --r-sm:   5px;
+  --r-md:   7px;
+  --r-lg:   10px;
+  --r-xl:   14px;
+  --r-pill: 999px;
+
+  /* control sizing (heights) */
+  --h-xs:   20px;
+  --h-sm:   26px;
+  --h-md:   30px;
+  --h-lg:   36px;
+
+  /* borders */
+  --bw:        1px;
+  --bw-strong: 1.5px;
+
+  /* shadows — restrained, cool-tinted */
+  --shadow-xs:  0 1px 0 oklch(0.2 0.02 258 / 0.04);
+  --shadow-sm:  0 1px 2px oklch(0.2 0.02 258 / 0.08), 0 1px 1px oklch(0.2 0.02 258 / 0.04);
+  --shadow-md:  0 4px 12px oklch(0.2 0.02 258 / 0.10), 0 1px 2px oklch(0.2 0.02 258 / 0.06);
+  --shadow-lg:  0 12px 32px oklch(0.2 0.02 258 / 0.16), 0 2px 6px oklch(0.2 0.02 258 / 0.08);
+  --shadow-pop: 0 16px 48px oklch(0.15 0.02 258 / 0.28);
+
+  /* focus */
+  --focus-width: 2px;
+
+  /* motion — quick, mechanical, no bounce */
+  --ease-out:    cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast:    90ms;
+  --dur-base:    150ms;
+  --dur-slow:    240ms;
+
+  /* layout rails */
+  --sidebar-w:    248px;
+  --inspector-w:  320px;
+  --terminal-h:   220px;
+  --row-h:        30px;
+  --topbar-h:     44px;
+}
+
+:root[data-theme="dark"] {
+  --shadow-sm:  0 1px 2px oklch(0 0 0 / 0.30), 0 1px 1px oklch(0 0 0 / 0.20);
+  --shadow-md:  0 6px 16px oklch(0 0 0 / 0.40), 0 1px 2px oklch(0 0 0 / 0.30);
+  --shadow-lg:  0 16px 40px oklch(0 0 0 / 0.52), 0 2px 6px oklch(0 0 0 / 0.34);
+  --shadow-pop: 0 24px 64px oklch(0 0 0 / 0.62);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --shadow-sm:  0 1px 2px oklch(0 0 0 / 0.30), 0 1px 1px oklch(0 0 0 / 0.20);
+    --shadow-md:  0 6px 16px oklch(0 0 0 / 0.40), 0 1px 2px oklch(0 0 0 / 0.30);
+    --shadow-lg:  0 16px 40px oklch(0 0 0 / 0.52), 0 2px 6px oklch(0 0 0 / 0.34);
+    --shadow-pop: 0 24px 64px oklch(0 0 0 / 0.62);
+  }
+}
+
+/* ============================================================
+   BASE element defaults
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  line-height: var(--lh-normal);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: 1px;
+  border-radius: var(--r-xs);
+}
+
+a { color: var(--info); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+code, kbd, samp { font-family: var(--font-mono); }
+
+/* thin scientific scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--r-pill);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
+
+/* a faint engineering grid you can drop behind canvases */
+.lx-grid-bg {
+  background-image:
+    linear-gradient(var(--border-subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
+  background-size: 24px 24px;
+}

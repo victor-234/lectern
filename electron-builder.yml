@@ -1,0 +1,24 @@
+appId: com.victor.lctrn
+productName: Lectern
+directories:
+  output: release
+  buildResources: resources
+# Built renderer/main/preload come from electron-vite's `out/`.
+files:
+  - out/**
+  - package.json
+# node-pty is a native addon; its .node binaries cannot be loaded from inside
+# the asar archive, so unpack them to the filesystem.
+asarUnpack:
+  - "**/node_modules/node-pty/**"
+mac:
+  category: public.app-category.productivity
+  icon: resources/icon.icns
+  target:
+    - dmg
+    - dir
+  # Personal/unsigned build: ad-hoc sign so the binary runs locally without an
+  # Apple Developer certificate. (Gatekeeper will still need a one-time bypass.)
+  identity: null
+# Native deps are already rebuilt for Electron via `npm run rebuild`.
+npmRebuild: false
