@@ -128,10 +128,24 @@ function clean(s: string): string {
   return s.replace(/[{}]/g, '').trim()
 }
 
+/**
+ * Emit one author for the BibTeX `author` field. A `{…}`-wrapped entry is a
+ * corporate/literal author: keep it as a single brace-protected unit (BibTeX
+ * sees `{{Alliance for Corporate Transparency}}` and cites the whole name,
+ * instead of parsing "for" as a particle and citing "Corporate Transparency").
+ * Personal names ("Smith, Jane" / "Jane Smith") are cleaned and left for BibTeX
+ * to parse as usual.
+ */
+function bibAuthor(a: string): string {
+  const t = a.trim()
+  if (t.startsWith('{') && t.endsWith('}') && t.length > 2) return `{${clean(t.slice(1, -1))}}`
+  return clean(t)
+}
+
 function bibEntry(r: ManualRef): string {
   const fields = [
     r.title && `  title       = {${clean(r.title)}}`,
-    r.authors.length && `  author      = {${r.authors.map(clean).join(' and ')}}`,
+    r.authors.length && `  author      = {${r.authors.map(bibAuthor).join(' and ')}}`,
     r.container && `  ${CONTAINER_FIELD[r.type].padEnd(11)} = {${clean(r.container)}}`,
     r.year && `  year        = {${clean(r.year)}}`,
     r.url && `  url         = {${r.url.trim()}}`,

@@ -120,8 +120,15 @@
     }
   }
 
+  // Show a corporate author ({…}-wrapped, kept literal in the bib) without its braces.
+  function displayAuthor(a: string): string {
+    const t = a.trim()
+    return t.startsWith('{') && t.endsWith('}') ? t.slice(1, -1).trim() : t
+  }
+
   function meta(r: ManualRef): string {
-    return [r.authors.join(', '), r.year, r.container].filter(Boolean).join(' · ')
+    const authors = r.authors.map(displayAuthor).join(', ')
+    return [authors, r.year, r.container].filter(Boolean).join(' · ')
   }
 </script>
 
@@ -177,8 +184,8 @@
         <label>Title
           <textarea rows="2" bind:value={draft.title} placeholder="Title of the source"></textarea>
         </label>
-        <label>Authors <small>one per line</small>
-          <textarea rows="2" bind:value={draft.authors} placeholder="Lastname, First"></textarea>
+        <label>Authors <small>one per line · person: “Lastname, First” · organization: wrap in {'{ }'} e.g. {'{Alliance for Corporate Transparency}'}</small>
+          <textarea rows="2" bind:value={draft.authors} placeholder={'Lastname, First\n{Organization name}'}></textarea>
         </label>
         <div class="frm-row">
           <label class="frm-year">Year<input bind:value={draft.year} placeholder="2026" /></label>
