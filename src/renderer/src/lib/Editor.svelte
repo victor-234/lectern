@@ -359,7 +359,9 @@
       borderRadius: 'var(--r-md)',
       boxShadow: 'var(--shadow-sm)',
       overflow: 'hidden',
-      zIndex: '300'
+      // Sit below the terminal dock (.termdock, z-index 20) so an expanded
+      // terminal covers the find panel rather than the other way around.
+      zIndex: '10'
     },
     '.cm-panels input, .cm-panels button': {
       fontFamily: 'var(--font-mono)',

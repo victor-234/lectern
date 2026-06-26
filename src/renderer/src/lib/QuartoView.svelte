@@ -549,6 +549,15 @@
     }
   }
 
+  // Exposed to App.svelte (via bind:this) so global keyboard shortcuts can drive
+  // the workspace: ⌘R renders the current doc to PDF, ⌘L toggles the render log.
+  export function renderPdf(): void {
+    void render('pdf')
+  }
+  export function toggleLog(): void {
+    showLog = !showLog
+  }
+
   const saveState = $derived(saving ? 'saving…' : dirty ? 'unsaved' : 'saved')
 </script>
 

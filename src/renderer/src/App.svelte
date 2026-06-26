@@ -90,8 +90,12 @@
       opts?: { project?: ProjectSummary | null }
     ) => Promise<void>
   } | null>(null)
+  let quartoRef = $state<{
+    renderPdf: () => void
+    toggleLog: () => void
+  } | null>(null)
 
-  const SWATCHES = ['var(--data-cyan)', 'var(--data-violet)', 'var(--data-green)', 'var(--data-amber)']
+  const SWATCHES =['var(--data-cyan)', 'var(--data-violet)', 'var(--data-green)', 'var(--data-amber)']
 
   // ---- boot -----------------------------------------------------------------
   async function boot(): Promise<void> {
@@ -507,7 +511,16 @@
     }
     // ⌘W is handled by the File ▸ Close menu item (see onCloseRequest above);
     // the menu accelerator intercepts it before this handler runs.
-    if (mod && e.key.toLowerCase() === 'j') {
+    if (mod && e.key.toLowerCase() === 'r') {
+      // ⌘R renders the current manuscript/slides to PDF (overrides the default
+      // page reload). Only meaningful while writing in the Workspace.
+      e.preventDefault()
+      if (mode === 'workspace' && selected) quartoRef?.renderPdf()
+    } else if (mod && e.key.toLowerCase() === 'l') {
+      // ⌘L toggles the render-log panel in the Workspace.
+      e.preventDefault()
+      if (mode === 'workspace' && selected) quartoRef?.toggleLog()
+    } else if (mod && e.key.toLowerCase() === 'j') {
       e.preventDefault()
       termOpen = !termOpen
     } else if (mod && e.key.toLowerCase() === 'k') {
@@ -573,7 +586,7 @@
 {:else if !libraryRoot}
   <LibrarySetup onready={onLibraryReady} />
 {:else}
-  <div class="lx-app">
+  <div class="lx-app" data-modal={manualRefsOpen}>
     <!-- ---- Top bar (nav + toolbar consolidated into one row) ----
          Zones, left→right, split by hairline dividers like the Slides bar:
          identity · app switcher ‖ contextual context … contextual actions ‖
@@ -778,6 +791,7 @@
           {#if workspaceMounted}
             {#if selected}
               <QuartoView
+                bind:this={quartoRef}
                 projectPath={selected.path}
                 which={workspaceDoc}
                 papers={libraryPapers}
