@@ -275,6 +275,27 @@ export async function addManualRef(projectPath: string, ref: Partial<ManualRef>)
   return refs
 }
 
+export async function updateManualRef(
+  projectPath: string,
+  citekey: string,
+  ref: Partial<ManualRef>
+): Promise<ManualRef[]> {
+  const refs = await listManualRefs(projectPath)
+  const idx = refs.findIndex((r) => r.citekey === citekey)
+  if (idx === -1) return refs
+  const r = normalize(ref)
+  // Keep the key stable unless the user changed it; if they did (or cleared it),
+  // re-uniquify against the other entries so we never collide.
+  r.citekey =
+    r.citekey === citekey
+      ? citekey
+      : uniqueKey(r.citekey || 'ref', refs.filter((_, i) => i !== idx).map((x) => x.citekey))
+  refs[idx] = r
+  await writeStore(projectPath, refs)
+  await ensureExtraBib(projectPath)
+  return refs
+}
+
 export async function deleteManualRef(projectPath: string, citekey: string): Promise<ManualRef[]> {
   const refs = (await listManualRefs(projectPath)).filter((r) => r.citekey !== citekey)
   await writeStore(projectPath, refs)
@@ -288,6 +309,11 @@ export function registerExtraRefs(ipcMain: IpcMain): void {
   ipcMain.handle('project:extraRefs:list', (_e, projectPath: string) => listManualRefs(projectPath))
   ipcMain.handle('project:extraRefs:add', (_e, args: { projectPath: string; ref: Partial<ManualRef> }) =>
     addManualRef(args.projectPath, args.ref)
+  )
+  ipcMain.handle(
+    'project:extraRefs:update',
+    (_e, args: { projectPath: string; citekey: string; ref: Partial<ManualRef> }) =>
+      updateManualRef(args.projectPath, args.citekey, args.ref)
   )
   ipcMain.handle(
     'project:extraRefs:delete',

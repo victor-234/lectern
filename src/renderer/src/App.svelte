@@ -452,10 +452,11 @@
     await window.api.projects.removePaper(selected.path, id)
     await Promise.all([loadProjectPapers(), loadProjects()])
   }
-  async function savePaper(id: string, patch: PaperPatch): Promise<void> {
-    await window.api.library.updatePaper(id, patch)
+  async function savePaper(id: string, patch: PaperPatch): ReturnType<typeof window.api.library.updatePaper> {
+    const res = await window.api.library.updatePaper(id, patch)
     await Promise.all([loadLibrary(), loadProjects()])
     await loadProjectPapers()
+    return res
   }
 
   // Re-run extraction (DOI→Crossref, else PDF) and overwrite the entry's metadata.

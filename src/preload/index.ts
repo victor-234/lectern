@@ -1,4 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { UpdatePaperResult } from '../main/library'
+import type { ExtractedMeta } from '../main/metadata'
 
 const api = {
   // App-level window/menu wiring.
@@ -36,9 +38,15 @@ const api = {
     deleteTag: (tagId: string) => ipcRenderer.invoke('library:deleteTag', tagId),
     pdf: (id: string): Promise<Uint8Array | null> => ipcRenderer.invoke('library:pdf', id),
     addPapers: () => ipcRenderer.invoke('library:addPapers'),
-    updatePaper: (id: string, patch: unknown) =>
+    updatePaper: (id: string, patch: unknown): Promise<UpdatePaperResult> =>
       ipcRenderer.invoke('library:updatePaper', { id, patch }),
     refetchPaper: (id: string): Promise<void> => ipcRenderer.invoke('library:refetchPaper', id),
+    // Suggest a `surnameYear` citekey from (possibly unsaved) authors + year.
+    suggestCitekey: (id: string, authors: string[], year?: string): Promise<string> =>
+      ipcRenderer.invoke('library:suggestCitekey', { id, authors, year }),
+    // Direct DOI→Crossref lookup for the edit form's Fetch button.
+    fetchDoi: (doi: string): Promise<ExtractedMeta | null> =>
+      ipcRenderer.invoke('library:fetchDoi', doi),
     renamePaper: (
       id: string
     ): Promise<{ renamed: boolean; reason?: string; from?: string; to?: string }> =>
@@ -126,6 +134,8 @@ const api = {
       list: (projectPath: string) => ipcRenderer.invoke('project:extraRefs:list', projectPath),
       add: (projectPath: string, ref: unknown) =>
         ipcRenderer.invoke('project:extraRefs:add', { projectPath, ref }),
+      update: (projectPath: string, citekey: string, ref: unknown) =>
+        ipcRenderer.invoke('project:extraRefs:update', { projectPath, citekey, ref }),
       delete: (projectPath: string, citekey: string) =>
         ipcRenderer.invoke('project:extraRefs:delete', { projectPath, citekey })
     },

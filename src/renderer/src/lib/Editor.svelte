@@ -90,7 +90,7 @@
     const options: Completion[] = matched.slice(0, 50).map((p) => ({
       label: `@${p.citekey}`,
       displayLabel: p.citekey,
-      detail: [citeAuthors(p.authors), p.year, p.journalAbbrev].filter(Boolean).join(' · '),
+      detail: [p.title, citeAuthors(p.authors), p.year, p.journalAbbrev].filter(Boolean).join(' · '),
       info: p.title || undefined,
       apply: `@${p.citekey}`,
       type: 'text'

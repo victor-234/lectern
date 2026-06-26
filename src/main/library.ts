@@ -6,8 +6,9 @@ import { basename, extname, isAbsolute, join, relative } from 'path'
 import { scaffoldProject, type ProjectMeta } from './scaffold'
 import { ensureQuartoDocs } from './quarto'
 import { extractMetadata, type ExtractedMeta } from './metadata'
-import { buildHouseFilename, extensionOf } from './houseName'
+import { buildHouseFilename, extensionOf, lastName } from './houseName'
 import { paperInteractedAt } from './paperNotes'
+import { renameCitekeyEverywhere, type CitekeyRewriteResult } from './citekeys'
 
 /**
  * All paper PDFs live in this folder inside the library root. Deliberately NOT
@@ -714,15 +715,24 @@ export interface PaperPatch {
  * goes into `.lctrn/journals.json` (so every paper of that journal follows);
  * only journal-less papers keep it on the entry itself. Regenerates the
  * library-wide references.bib, since the bib is materialized from this metadata.
+ *
+ * When the citekey changes, every `@oldkey` already cited in a manuscript or note
+ * is rewritten to the new key (see `renameCitekeyEverywhere`); the returned
+ * summary reports how much prose was touched so the UI can confirm it.
  */
+export interface UpdatePaperResult extends CitekeyRewriteResult {
+  citekey?: { from: string; to: string }
+}
+
 export async function updateLibraryPaper(
   root: string,
   id: string,
   patch: PaperPatch
-): Promise<void> {
+): Promise<UpdatePaperResult> {
   const reg = await readRegistry(root)
   const p = reg.papers.find((x) => x.id === id)
-  if (!p) return
+  if (!p) return { files: 0, occurrences: 0 }
+  const oldKey = p.citekey
 
   const clean = (v?: string): string | undefined => v?.trim() || undefined
   if (patch.title !== undefined) p.title = clean(patch.title)
@@ -759,6 +769,13 @@ export async function updateLibraryPaper(
   // The bib entries are materialized from this metadata — refresh the one
   // library-wide bib that every project cites.
   await regenerateMasterBib(root)
+
+  // Follow a citekey rename through to everything that cites the old key.
+  if (p.citekey !== oldKey) {
+    const rewrite = await renameCitekeyEverywhere(root, oldKey, p.citekey)
+    return { ...rewrite, citekey: { from: oldKey, to: p.citekey } }
+  }
+  return { files: 0, occurrences: 0 }
 }
 
 /** Set (or clear, with undefined) the user's abbreviation for a journal name. */
@@ -1056,15 +1073,20 @@ export async function refetchLibraryPaper(root: string, id: string): Promise<voi
   const reg = await readRegistry(root)
   const target = reg.papers.find((x) => x.id === id)
   if (!target) return
+  const oldKey = target.citekey
   applyMeta(reg, target, meta, true)
   await writeRegistry(root, reg)
   await regenerateMasterBib(root)
+  // A refetch can promote the citekey (e.g. learning author+year) — follow it
+  // through to anything already citing the old key.
+  if (target.citekey !== oldKey) await renameCitekeyEverywhere(root, oldKey, target.citekey)
 }
 
 function surnameOf(author?: string): string | undefined {
   if (!author) return undefined
-  const last = author.trim().split(/\s+/).pop() ?? ''
-  const s = last.toLowerCase().replace(/[^a-z]/g, '')
+  // Reuse the citation surname logic so "De Franco, Gus" keys as "defranco",
+  // not "gus" — and so multi-word/particle surnames match the bib + filename.
+  const s = lastName(author).toLowerCase().replace(/[^a-z]/g, '')
   return s || undefined
 }
 
@@ -1073,6 +1095,28 @@ function uniqueCitekey(reg: Registry, self: LibraryPaper, base: string): string 
   let n = 2
   while (reg.papers.some((p) => p !== self && p.citekey === key)) key = `${base}${String.fromCharCode(96 + n++)}`
   return key
+}
+
+/**
+ * Suggest a `surnameYear` citekey for a paper from the given (possibly unsaved)
+ * authors + year — the data behind the Inspector's "Generate" button. Mirrors the
+ * promotion in `applyMeta`, and disambiguates against the rest of the registry
+ * (excluding this paper) so the field shows exactly what would be saved. Falls
+ * back to the paper's current key when there isn't enough to build one.
+ */
+export async function suggestCitekey(
+  root: string,
+  id: string,
+  authors: string[],
+  year?: string
+): Promise<string> {
+  const reg = await readRegistry(root)
+  const self = reg.papers.find((p) => p.id === id)
+  if (!self) return ''
+  const surname = surnameOf(authors.find((a) => a.trim()))
+  const yr = year?.match(/\d{4}/)?.[0]
+  if (!surname || !yr) return self.citekey // too sparse — keep the current key
+  return uniqueCitekey(reg, self, `${surname}${yr}`)
 }
 
 // --- Projects ----------------------------------------------------------------

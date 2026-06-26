@@ -232,7 +232,7 @@
               {#each projects as p (p.path)}
                 <button class="tl-item" role="menuitem" onclick={() => launch(p)}>
                   <Icon n="folder" />
-                  <span class="tl-name">{p.title}</span>
+                  <span class="tl-name">{p.name}</span>
                 </button>
               {/each}
             {/if}

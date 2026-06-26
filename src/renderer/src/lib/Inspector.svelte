@@ -1,7 +1,13 @@
 <script lang="ts">
   import Icon from './Icon.svelte'
-  import { buildHouseFilename, extensionOf, normalizeAuthorName } from '../../../main/houseName'
+  import {
+    buildHouseFilename,
+    displayAuthorName,
+    extensionOf,
+    normalizeAuthorName
+  } from '../../../main/houseName'
   import type { ResolvedPaper, Tag, PaperPatch } from '../global'
+  import type { UpdatePaperResult } from '../../../main/library'
 
   let {
     paper,
@@ -26,7 +32,7 @@
     onwrite: () => void
     /** Open this paper's PDF in the Reader. */
     onread?: (p: ResolvedPaper) => void
-    onsave?: (id: string, patch: PaperPatch) => Promise<void>
+    onsave?: (id: string, patch: PaperPatch) => Promise<UpdatePaperResult | void>
     /** Re-run extraction and overwrite this paper's metadata from its PDF. */
     onrefetch?: (p: ResolvedPaper) => Promise<void>
     /** Rename the PDF on disk to the metadata-derived house style. */
@@ -37,7 +43,11 @@
     ondelete?: (p: ResolvedPaper) => Promise<void>
   } = $props()
 
-  const authorList = $derived(paper && paper.authors.length ? paper.authors.join(', ') : 'Authors not extracted')
+  const authorList = $derived(
+    paper && paper.authors.length
+      ? paper.authors.map(displayAuthorName).join(', ')
+      : 'Authors not extracted'
+  )
   const paperTags = $derived(
     paper?.tagIds ? tags.filter((t) => paper!.tagIds!.includes(t.id)) : []
   )
@@ -56,6 +66,10 @@
   let refetching = $state(false)
   let renaming = $state(false)
   let removing = $state(false)
+  let generating = $state(false)
+  let fetching = $state(false)
+  // One-line confirmation after a save propagated a citekey rename ('' = hidden).
+  let rewriteMsg = $state('')
 
   // House-style filename this paper's metadata would produce ('' = too sparse).
   const proposedName = $derived(
@@ -90,14 +104,16 @@
     tagIds: [] as string[]
   })
 
-  // Selecting a different paper drops any in-progress edit.
+  // Selecting a different paper drops any in-progress edit + stale confirmation.
   $effect(() => {
     paper?.id
     editing = false
+    rewriteMsg = ''
   })
 
   function startEdit(): void {
     if (!paper) return
+    rewriteMsg = ''
     draft = {
       citekey: paper.citekey,
       title: paper.title ?? '',
@@ -128,6 +144,12 @@
       : [...draft.tagIds, id]
   }
 
+  // Parse the textarea (one author per line) into normalized "First Last" names.
+  // House rule: "Last, First" (has a comma) → "First Last"; bare names kept as-is.
+  function draftAuthors(): string[] {
+    return draft.authors.split('\n').map(normalizeAuthorName).filter(Boolean)
+  }
+
   async function save(): Promise<void> {
     if (!paper || !onsave) return
     saving = true
@@ -135,11 +157,10 @@
       // $state.snapshot strips the Svelte reactive Proxy — a raw proxy can't
       // cross Electron IPC (structured clone throws DataCloneError).
       const d = $state.snapshot(draft)
-      await onsave(paper.id, {
+      const res = await onsave(paper.id, {
         citekey: d.citekey,
         title: d.title,
-        // House rule: "Last, First" (has a comma) → "First Last"; bare names kept as-is.
-        authors: d.authors.split('\n').map(normalizeAuthorName).filter(Boolean),
+        authors: draftAuthors(),
         year: d.year,
         journal: d.journal,
         journalAbbrev: d.journalAbbrev,
@@ -151,11 +172,63 @@
         tagIds: [...d.tagIds]
       })
       editing = false
+      // Confirm a citekey rename that rippled out into manuscripts/notes.
+      rewriteMsg =
+        res && res.citekey && res.occurrences > 0
+          ? `Renamed @${res.citekey.from} → @${res.citekey.to} in ${res.occurrences} ` +
+            `place${res.occurrences === 1 ? '' : 's'} across ${res.files} ` +
+            `file${res.files === 1 ? '' : 's'}.`
+          : ''
     } catch (err) {
       console.error('Failed to save paper metadata', err)
       alert('Could not save: ' + (err instanceof Error ? err.message : String(err)))
     } finally {
       saving = false
+    }
+  }
+
+  // Fill the Citekey field with a generated `surnameYear` key from the current
+  // (possibly unsaved) authors + year. The main process disambiguates against the
+  // rest of the library, so the value shown is exactly what a save would store.
+  async function generateKey(): Promise<void> {
+    if (!paper || generating) return
+    generating = true
+    try {
+      const key = await window.api.library.suggestCitekey(paper.id, draftAuthors(), draft.year)
+      if (key) draft.citekey = key
+    } catch (err) {
+      console.error('Failed to generate citekey', err)
+    } finally {
+      generating = false
+    }
+  }
+
+  // Pull canonical metadata for the typed DOI from Crossref into the edit form.
+  async function fetchFromDoi(): Promise<void> {
+    const doi = draft.doi.trim()
+    if (!doi || fetching) return
+    fetching = true
+    try {
+      const m = await window.api.library.fetchDoi(doi)
+      if (!m) {
+        alert('No Crossref match for that DOI.')
+        return
+      }
+      if (m.title) draft.title = m.title
+      if (m.authors && m.authors.length) draft.authors = m.authors.join('\n')
+      if (m.year) draft.year = m.year
+      if (m.journal) draft.journal = m.journal
+      if (m.journalAbbrev) draft.journalAbbrev = m.journalAbbrev
+      if (m.volume) draft.volume = m.volume
+      if (m.issue) draft.issue = m.issue
+      if (m.pages) draft.pages = m.pages
+      if (m.abstract) draft.abstract = m.abstract
+      if (m.doi) draft.doi = m.doi
+    } catch (err) {
+      console.error('Failed to fetch metadata from DOI', err)
+      alert('Could not fetch from Crossref: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      fetching = false
     }
   }
 
@@ -275,16 +348,31 @@
       <div class="insp-authors">{authorList}</div>
     </div>
 
+    {#if rewriteMsg && !editing}
+      <div class="insp-rewrite" role="status">{rewriteMsg}</div>
+    {/if}
+
     {#if editing}
       <div class="insp-scroll">
         <div class="insp-sec">
           <h5>Edit metadata</h5>
           <div class="frm">
             <label>Title<textarea rows="2" bind:value={draft.title}></textarea></label>
-            <label>Authors <small>one per line · “First Last”, or “Last, First” to flip</small><textarea rows="4" bind:value={draft.authors}></textarea></label>
+            <label>Authors <small>one per line · “First Last”, or “Last, First” for multi-word surnames (e.g. “De Franco, Gus” → cites as “De Franco”)</small><textarea rows="4" bind:value={draft.authors}></textarea></label>
             <div class="frm-row">
               <label>Year<input bind:value={draft.year} placeholder="2026" /></label>
-              <label>Citekey<input bind:value={draft.citekey} /></label>
+              <label>Citekey
+                <span class="frm-inline">
+                  <input bind:value={draft.citekey} />
+                  <button
+                    type="button"
+                    class="btn btn--secondary frm-inline-btn"
+                    title="Generate a surnameYear key from the authors + year"
+                    disabled={generating}
+                    onclick={generateKey}
+                  >{generating ? '…' : 'Generate'}</button>
+                </span>
+              </label>
             </div>
             <label>Journal<input bind:value={draft.journal} list="journal-list" oninput={onJournalPick} /></label>
             <datalist id="journal-list">
@@ -298,7 +386,18 @@
               <label>Issue<input bind:value={draft.issue} placeholder="3" /></label>
               <label>Pages<input bind:value={draft.pages} placeholder="123–145" /></label>
             </div>
-            <label>DOI<input bind:value={draft.doi} placeholder="10.…" /></label>
+            <label>DOI <small>fetch fills the fields above from Crossref</small>
+              <span class="frm-inline">
+                <input bind:value={draft.doi} placeholder="10.…" />
+                <button
+                  type="button"
+                  class="btn btn--secondary frm-inline-btn"
+                  title="Look up this DOI on Crossref and fill the form"
+                  disabled={fetching || !draft.doi.trim()}
+                  onclick={fetchFromDoi}
+                >{fetching ? 'Fetching…' : 'Fetch'}</button>
+              </span>
+            </label>
             <label>Abstract<textarea rows="6" bind:value={draft.abstract}></textarea></label>
           </div>
         </div>
@@ -481,6 +580,30 @@
   .frm input:focus,
   .frm textarea:focus {
     border-color: var(--accent-line);
+  }
+  /* Input + inline action button (Generate citekey / Fetch DOI). */
+  .frm-inline {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+  }
+  .frm-inline input {
+    flex: 1;
+  }
+  .frm-inline-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  /* Confirmation that a citekey rename rippled into manuscripts/notes. */
+  .insp-rewrite {
+    margin: 8px 14px 0;
+    padding: 7px 10px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-muted);
+    background: var(--surface-inset);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
   }
   .iconbtn--danger:hover:not(:disabled) {
     color: var(--danger);

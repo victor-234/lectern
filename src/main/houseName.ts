@@ -63,11 +63,15 @@ function isParticle(tok: string): boolean {
 
 /**
  * House convention for a single author string: a comma means "Last, First", no
- * comma means "First Last". Normalizes either form to canonical "First Last" so
- * stored/displayed names are consistent. Only the first comma is treated as the
- * surname separator (handles suffixes like "van der Berg, Jan A."); extra commas
- * are left in the given-names tail. A bare "Last" (no comma, single token) is
- * returned as-is.
+ * comma means "First Last". Normalizes to canonical "First Last" so stored names
+ * are consistent — but only when the surname can be read back out of that flat
+ * form. A surname with a capitalised particle ("De Franco, Gus") would collapse
+ * to "Gus De Franco", which `lastName` then reads as surname "Franco"; for those
+ * the explicit "Last, First" comma form is preserved instead, so the surname
+ * boundary (and the citation "De Franco et al.") survives. BibTeX parses the
+ * "Last, First" form natively, and `lastName`/`displayAuthorName` understand it.
+ * Only the first comma is the surname separator (handles "van der Berg, Jan A.");
+ * extra commas stay in the given-names tail. A bare "Last" is returned as-is.
  */
 export function normalizeAuthorName(raw: string): string {
   const trimmed = raw.trim().replace(/\s+/g, ' ')
@@ -78,7 +82,24 @@ export function normalizeAuthorName(raw: string): string {
   const first = trimmed.slice(comma + 1).trim()
   if (!first) return last
   if (!last) return first
+  // Keep the comma form when flipping would lose the surname boundary.
+  if (lastName(`${first} ${last}`) !== last) return `${last}, ${first}`
   return `${first} ${last}`
+}
+
+/**
+ * Render a stored author name for reading as "First Last", flipping back the
+ * explicit "Last, First" comma form the registry keeps for multi-word surnames
+ * (e.g. "De Franco, Gus" → "Gus De Franco"). Presentation only — the stored form
+ * is what drives citations, the bibliography, and house filenames.
+ */
+export function displayAuthorName(name: string): string {
+  const trimmed = name.trim()
+  const comma = trimmed.indexOf(',')
+  if (comma < 0) return trimmed
+  const last = trimmed.slice(0, comma).trim()
+  const first = trimmed.slice(comma + 1).trim()
+  return first && last ? `${first} ${last}` : trimmed
 }
 
 /**

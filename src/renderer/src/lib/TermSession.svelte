@@ -27,6 +27,23 @@
   let fit: FitAddon
   let running = false
 
+  // Build xterm's theme from the live --term-* tokens so the terminal follows
+  // the app theme (a softer charcoal in light mode, near-black in dark). xterm 6
+  // parses the oklch tokens directly. Only bg/fg/cursor/selection are overridden
+  // — the 16 ANSI colors keep xterm's defaults so Claude's TUI palette stays vivid.
+  function readTermTheme(): import('@xterm/xterm').ITheme {
+    const cs = getComputedStyle(host)
+    const v = (name: string): string => cs.getPropertyValue(name).trim()
+    const bg = v('--term-bg')
+    return {
+      background: bg,
+      foreground: v('--term-fg'),
+      cursor: v('--accent'),
+      cursorAccent: bg,
+      selectionBackground: v('--term-selection')
+    }
+  }
+
   /** Type a line into the pty and submit it. No-op until Claude has booted. */
   export function send(text: string): void {
     if (!running) return
@@ -48,8 +65,9 @@
       fontSize: 11.5,
       fontFamily: "'JetBrains Mono', ui-monospace, Menlo, monospace",
       cursorBlink: true,
-      // The terminal stays dark in both themes (per the lectron design).
-      theme: { background: '#101117', foreground: '#e9e9ee', cursor: '#56b1ff' }
+      // Theme is read live from the --term-* CSS tokens (dark, but a softer
+      // charcoal in light mode) and re-applied on theme toggle below.
+      theme: readTermTheme()
     })
     fit = new FitAddon()
     term.loadAddon(fit)
@@ -73,6 +91,19 @@
     })
     ro.observe(host)
 
+    // xterm caches its theme at construction, so re-apply when the app theme
+    // changes — either an explicit <html data-theme> toggle or the OS fallback.
+    const applyTheme = (): void => {
+      if (term) term.options.theme = readTermTheme()
+    }
+    const themeObserver = new MutationObserver(applyTheme)
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme']
+    })
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    mq.addEventListener('change', applyTheme)
+
     // Boot Claude in this session's working directory.
     void (async () => {
       const res = await window.api.pty.spawn({ id: sid, cwd, cmd: 'claude' })
@@ -92,6 +123,8 @@
 
     return () => {
       ro.disconnect()
+      themeObserver.disconnect()
+      mq.removeEventListener('change', applyTheme)
       disposers.forEach((d) => d())
       window.api.pty.kill(sid)
       term.dispose()

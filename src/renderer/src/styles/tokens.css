@@ -67,18 +67,20 @@
   --selection:         oklch(0.706 0.150 250 / 0.22);
   --focus-ring:        oklch(0.66 0.140 245 / 0.55);
 
-  /* terminal (a terminal is dark even in light mode) */
-  --term-bg:           oklch(0.205 0.012 258);
-  --term-chrome:       oklch(0.255 0.012 258);
+  /* terminal — stays dark in light mode too, but a softer/dimmed charcoal
+     (not the near-black of dark mode) so it reads as intentional against the
+     light UI. xterm reads these vars live (see TermSession.svelte). */
+  --term-bg:           oklch(0.38 0.012 258);
+  --term-chrome:       oklch(0.43 0.012 258);
   --term-fg:           oklch(0.92 0.006 250);
-  --term-dim:          oklch(0.62 0.010 250);
+  --term-dim:          oklch(0.66 0.010 250);
   --term-prompt:       var(--accent);
   --term-green:        oklch(0.78 0.155 158);
   --term-cyan:         oklch(0.80 0.105 205);
   --term-violet:       oklch(0.74 0.150 300);
   --term-red:          oklch(0.70 0.180 25);
   --term-selection:    oklch(0.706 0.150 250 / 0.30);
-  --term-border:       oklch(0.34 0.012 258);
+  --term-border:       oklch(0.50 0.012 258);
 }
 
 /* ============ DARK MODE — IDE / database surface ============== */

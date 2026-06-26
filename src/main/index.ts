@@ -29,6 +29,7 @@ import {
   readPaperPdf,
   updateLibraryPaper,
   refetchLibraryPaper,
+  suggestCitekey,
   renamePaperToHouseStyle,
   previewHouseRenames,
   type PaperPatch,
@@ -36,6 +37,7 @@ import {
   removeProjectPaper,
   setLibraryRoot
 } from './library'
+import { fetchByDoi } from './metadata'
 import {
   listInquiries,
   readInquiry,
@@ -251,12 +253,22 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('library:updatePaper', async (_e, args: { id: string; patch: PaperPatch }) => {
     const root = await getLibraryRoot()
-    if (root) await updateLibraryPaper(root, args.id, args.patch)
+    return root ? updateLibraryPaper(root, args.id, args.patch) : { files: 0, occurrences: 0 }
   })
   ipcMain.handle('library:refetchPaper', async (_e, id: string) => {
     const root = await getLibraryRoot()
     if (root) await refetchLibraryPaper(root, id)
   })
+  ipcMain.handle(
+    'library:suggestCitekey',
+    async (_e, args: { id: string; authors: string[]; year?: string }) => {
+      const root = await getLibraryRoot()
+      return root ? suggestCitekey(root, args.id, args.authors, args.year) : ''
+    }
+  )
+  // Direct DOI→Crossref lookup for the Inspector's Fetch button (returns metadata
+  // for the renderer to drop into the edit form; does not mutate the registry).
+  ipcMain.handle('library:fetchDoi', (_e, doi: string) => fetchByDoi(doi))
   ipcMain.handle('library:renamePaper', async (_e, id: string) => {
     const root = await getLibraryRoot()
     return root ? renamePaperToHouseStyle(root, id) : { renamed: false, reason: 'missing' }

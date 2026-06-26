@@ -104,6 +104,24 @@ function splitAuthors(raw: string): string[] {
 
 // --- DOI + Crossref ----------------------------------------------------------
 
+/**
+ * Fetch canonical metadata for a user-supplied DOI from Crossref. Unlike
+ * `extractMetadata` (which only reaches Crossref via a DOI scraped from the PDF),
+ * this is the direct "I'll give you the DOI" path used by the Inspector's Fetch
+ * button. Accepts a raw DOI, a `doi:` prefix, or a `https://doi.org/…` URL.
+ * Returns null on no match / network error so the caller can report "not found".
+ */
+export async function fetchByDoi(rawDoi: string): Promise<ExtractedMeta | null> {
+  // Normalize: drop a URL/scheme prefix, then reuse the body-text DOI matcher to
+  // pull out the bare `10.…` token and trim trailing punctuation.
+  const stripped = rawDoi.trim().replace(/^\s*(?:https?:\/\/(?:dx\.)?doi\.org\/|doi:)/i, '')
+  const doi = findDoi(stripped)
+  if (!doi) return null
+  const cr = await fromCrossref(doi).catch(() => null)
+  if (!cr) return null
+  return backfill({ ...cr, source: 'crossref' }, {})
+}
+
 /** Match a DOI in body text, trimming trailing punctuation that often clings to it. */
 export function findDoi(text: string): string | undefined {
   const m = text.match(/\b10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/)
@@ -122,9 +140,7 @@ async function fromCrossref(doi: string): Promise<Partial<ExtractedMeta> | null>
   if (!w) return null
   return {
     title: decodeEntities(w.title?.[0]),
-    authors: (w.author ?? [])
-      .map((a) => [a.given, a.family].filter(Boolean).join(' ').trim())
-      .filter(Boolean),
+    authors: (w.author ?? []).map((a) => crossrefAuthor(a.given, a.family)).filter(Boolean),
     year: crossrefYear(w),
     doi: w.DOI ?? doi,
     journal: decodeEntities(w['container-title']?.[0]),
@@ -173,6 +189,20 @@ function crossrefYear(w: CrossrefWork): string | undefined {
   return y ? String(y) : undefined
 }
 
+/**
+ * Build an author name from Crossref's structured given/family parts. Crossref
+ * knows the surname boundary, so route both-present names through
+ * `normalizeAuthorName` in "Family, Given" form: it flips to "First Last" for an
+ * ordinary surname but keeps the explicit comma form when the family is
+ * multi-word (e.g. "De Franco"), so the citation renders "De Franco et al."
+ */
+function crossrefAuthor(given?: string, family?: string): string {
+  const g = (given ?? '').trim()
+  const f = (family ?? '').trim()
+  if (g && f) return normalizeAuthorName(`${f}, ${g}`)
+  return [g, f].filter(Boolean).join(' ').trim()
+}
+
 function stripJats(s: string): string {
   return s
     .replace(/<[^>]+>/g, ' ')
@@ -185,7 +215,7 @@ function stripJats(s: string): string {
 const CLAUDE_PROMPT = `You are given the raw text of the first page(s) of an academic paper PDF.
 Extract its bibliographic metadata. Respond with ONLY a single JSON object, no prose, no code fences, in exactly this shape:
 {"title": string, "authors": string[], "year": string, "doi": string|null, "journal": string|null}
-"authors" is an ordered list of full author names in "First Last" order (e.g. "Jane Smith"), not "Last, First". "year" is the 4-digit publication year as a string.
+"authors" is an ordered list of full author names in "First Last" order (e.g. "Jane Smith"). Exception: when a surname has multiple words or a capitalized particle (e.g. "De Franco", "Van Order"), give that author as "Last, First" (e.g. "De Franco, Gus") so the full surname is preserved. "year" is the 4-digit publication year as a string.
 If a field is unknown use null (or [] for authors). Do not invent values.
 
 --- PAPER TEXT ---

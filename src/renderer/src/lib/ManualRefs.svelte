@@ -43,11 +43,13 @@
     note: ''
   })
   let draft = $state(blank())
+  // citekey of the reference currently being edited, or null when adding a new one.
+  let editingKey = $state<string | null>(null)
 
   const containerLabel = $derived(
     TYPES.find((t) => t.value === draft.type)?.container ?? 'Published in'
   )
-  const canAdd = $derived(draft.title.trim().length > 0 && !busy)
+  const canSave = $derived(draft.title.trim().length > 0 && !busy)
 
   async function refresh(): Promise<void> {
     refs = await window.api.projects.extraRefs.list(projectPath)
@@ -56,12 +58,32 @@
     void refresh()
   })
 
-  async function add(): Promise<void> {
-    if (!canAdd) return
+  function startEdit(r: ManualRef): void {
+    editingKey = r.citekey
+    draft = {
+      type: r.type,
+      citekey: r.citekey,
+      title: r.title,
+      authors: r.authors.join('\n'),
+      year: r.year,
+      container: r.container,
+      url: r.url,
+      doi: r.doi,
+      note: r.note
+    }
+  }
+
+  function cancelEdit(): void {
+    editingKey = null
+    draft = blank()
+  }
+
+  async function save(): Promise<void> {
+    if (!canSave) return
     busy = true
     try {
       const d = $state.snapshot(draft)
-      refs = await window.api.projects.extraRefs.add(projectPath, {
+      const ref = {
         type: d.type,
         citekey: d.citekey,
         title: d.title,
@@ -74,11 +96,15 @@
         url: d.url,
         doi: d.doi,
         note: d.note
-      })
+      }
+      refs = editingKey
+        ? await window.api.projects.extraRefs.update(projectPath, editingKey, ref)
+        : await window.api.projects.extraRefs.add(projectPath, ref)
+      editingKey = null
       draft = blank()
     } catch (err) {
-      console.error('Failed to add manual reference', err)
-      alert('Could not add reference: ' + (err instanceof Error ? err.message : String(err)))
+      console.error('Failed to save manual reference', err)
+      alert('Could not save reference: ' + (err instanceof Error ? err.message : String(err)))
     } finally {
       busy = false
     }
@@ -88,6 +114,7 @@
     busy = true
     try {
       refs = await window.api.projects.extraRefs.delete(projectPath, citekey)
+      if (editingKey === citekey) cancelEdit()
     } finally {
       busy = false
     }
@@ -116,12 +143,15 @@
     <!-- Existing refs -->
     <ul class="mr-list">
       {#each refs as r (r.citekey)}
-        <li class="mr-row">
+        <li class="mr-row" data-editing={editingKey === r.citekey}>
           <span class="mr-row-main">
             <span class="mr-row-title">{r.title || r.citekey}</span>
             <span class="mr-row-meta">@{r.citekey}{meta(r) ? ' · ' + meta(r) : ''}</span>
           </span>
-          <button class="iconbtn mr-del" title="Delete reference" disabled={busy} onclick={() => del(r.citekey)}>
+          <button class="iconbtn mr-act" title="Edit reference" disabled={busy} onclick={() => startEdit(r)}>
+            <Icon n="pen" />
+          </button>
+          <button class="iconbtn mr-act" title="Delete reference" disabled={busy} onclick={() => del(r.citekey)}>
             <Icon n="x" />
           </button>
         </li>
@@ -130,9 +160,9 @@
       {/each}
     </ul>
 
-    <!-- Add form -->
+    <!-- Add / edit form -->
     <div class="mr-form">
-      <h4>Add a reference</h4>
+      <h4>{editingKey ? 'Edit reference' : 'Add a reference'}</h4>
       <div class="frm">
         <div class="frm-row">
           <label class="frm-type">Type
@@ -161,8 +191,11 @@
         </div>
       </div>
       <div class="mr-foot">
-        <button class="btn btn--primary" disabled={!canAdd} onclick={add}>
-          <Icon n="plus" />Add reference
+        {#if editingKey}
+          <button class="btn" disabled={busy} onclick={cancelEdit}>Cancel</button>
+        {/if}
+        <button class="btn btn--primary" disabled={!canSave} onclick={save}>
+          <Icon n={editingKey ? 'check' : 'plus'} />{editingKey ? 'Save changes' : 'Add reference'}
         </button>
       </div>
     </div>
@@ -258,10 +291,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .mr-del {
+  .mr-act {
     opacity: 0.5;
   }
-  .mr-row:hover .mr-del {
+  .mr-row:hover .mr-act {
+    opacity: 1;
+  }
+  .mr-row[data-editing='true'] {
+    background: var(--accent-weak, #eef3ff);
+    box-shadow: inset 2px 0 0 var(--accent, #3b6fff);
+  }
+  .mr-row[data-editing='true'] .mr-act {
     opacity: 1;
   }
   .mr-empty {

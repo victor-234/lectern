@@ -16,6 +16,21 @@
   let running = $state(false)
   let error = $state<string | null>(null)
 
+  // Theme follows the live --term-* tokens (softer charcoal in light mode);
+  // xterm 6 parses the oklch tokens directly.
+  function readTermTheme(): import('@xterm/xterm').ITheme {
+    const cs = getComputedStyle(host)
+    const v = (name: string): string => cs.getPropertyValue(name).trim()
+    const bg = v('--term-bg')
+    return {
+      background: bg,
+      foreground: v('--term-fg'),
+      cursor: v('--accent'),
+      cursorAccent: bg,
+      selectionBackground: v('--term-selection')
+    }
+  }
+
   function setRunning(v: boolean): void {
     running = v
     onrunningchange?.(v)
@@ -26,7 +41,7 @@
       fontSize: 11.5,
       fontFamily: "'JetBrains Mono', ui-monospace, Menlo, monospace",
       cursorBlink: true,
-      theme: { background: '#101117', foreground: '#e9e9ee', cursor: '#56b1ff' }
+      theme: readTermTheme()
     })
     fit = new FitAddon()
     term.loadAddon(fit)
@@ -49,8 +64,22 @@
     })
     ro.observe(host)
 
+    // xterm caches its theme at construction — re-apply on app theme change.
+    const applyTheme = (): void => {
+      if (term) term.options.theme = readTermTheme()
+    }
+    const themeObserver = new MutationObserver(applyTheme)
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme']
+    })
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    mq.addEventListener('change', applyTheme)
+
     return () => {
       ro.disconnect()
+      themeObserver.disconnect()
+      mq.removeEventListener('change', applyTheme)
       disposers.forEach((d) => d())
       window.api.pty.kill(SID)
       term.dispose()
@@ -99,7 +128,7 @@
     flex-direction: column;
     min-height: 0;
     flex: 1;
-    background: #101117;
+    background: var(--term-bg);
     border-radius: var(--r-md);
     overflow: hidden;
   }
