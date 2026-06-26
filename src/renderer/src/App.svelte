@@ -586,7 +586,7 @@
 {:else if !libraryRoot}
   <LibrarySetup onready={onLibraryReady} />
 {:else}
-  <div class="lx-app" data-modal={manualRefsOpen}>
+  <div class="lx-app" class:modal-open={manualRefsOpen}>
     <!-- ---- Top bar (nav + toolbar consolidated into one row) ----
          Zones, left→right, split by hairline dividers like the Slides bar:
          identity · app switcher ‖ contextual context … contextual actions ‖

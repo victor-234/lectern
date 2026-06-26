@@ -134,9 +134,9 @@ body { overflow: hidden; }
 /* The dock reserves only the 30px bar in flow; the panel itself is anchored to
    the bottom and floats over the workspace (header bar on top, growing upward),
    so resizing the terminal never reflows the manuscript area. */
-/* Hide the editor's floating find panel (⌘F) while a modal is open so it can't
-   poke through the references dialog / its backdrop. */
-.lx-app[data-modal="true"] .cm-panels { display: none !important; }
+/* Hide the editor's floating find panel (⌘F) while a modal is open so it doesn't
+   linger (dimly) behind the references dialog / its backdrop. */
+.lx-app.modal-open .cm-panels { display: none !important; }
 .termdock { flex: none; height: 30px; position: relative; z-index: 20; }
 .term-panel { position: absolute; left: 0; right: 0; bottom: 0; height: 30px; display: flex; flex-direction: column; background: var(--term-bg); border-top: 1px solid var(--term-border); }
 .termdock.open .term-panel { box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.35); }

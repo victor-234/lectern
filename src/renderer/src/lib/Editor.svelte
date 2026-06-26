@@ -287,7 +287,13 @@
       height: '100%',
       backgroundColor: 'var(--surface)',
       color: 'var(--text)',
-      fontSize: '13.5px'
+      fontSize: '13.5px',
+      // Trap the editor (and its floating find panel / autocomplete popups) in
+      // its own stacking context at z-index 0, so they always sit BELOW the
+      // terminal dock (z-index 20) and the references modal (z-index 40) instead
+      // of poking through them.
+      position: 'relative',
+      zIndex: '0'
     },
     '.cm-scroller': {
       fontFamily: 'var(--font-mono)',
@@ -358,10 +364,7 @@
       border: '1px solid var(--border)',
       borderRadius: 'var(--r-md)',
       boxShadow: 'var(--shadow-sm)',
-      overflow: 'hidden',
-      // Sit below the terminal dock (.termdock, z-index 20) so an expanded
-      // terminal covers the find panel rather than the other way around.
-      zIndex: '10'
+      overflow: 'hidden'
     },
     '.cm-panels input, .cm-panels button': {
       fontFamily: 'var(--font-mono)',
