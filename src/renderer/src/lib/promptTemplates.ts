@@ -23,6 +23,26 @@ function ref(p: PromptPaper): string {
   return `the paper at \`${p.absPath}\` (cite as [@${p.citekey}])`
 }
 
+// Context lead-in for a free-form ("custom") prompt: names the paper, its path
+// and citekey up front so the user only has to fill in the actual instruction.
+// The result is `<context>\n\n<their words>`.
+export function buildCustomPrompt(p: PromptPaper, instruction: string): string {
+  const context =
+    `Regarding "${p.title}" — ${ref(p)}. Read it first if you need to, then:\n\n`
+  return context + instruction.trim()
+}
+
+// Free-form prompt across several papers at once: lists each paper (title, path,
+// citekey) as a numbered reference, then the user's instruction. Used by the
+// Reader's "Prompt multiple papers" composer.
+export function buildMultiPrompt(papers: PromptPaper[], instruction: string): string {
+  const list = papers
+    .map((p, i) => `${i + 1}. "${p.title}" at \`${p.absPath}\` (cite as [@${p.citekey}])`)
+    .join('\n')
+  const context = `Regarding these papers:\n${list}\n\nRead any you need to, then:\n\n`
+  return context + instruction.trim()
+}
+
 export const PROMPT_TEMPLATES: PromptTemplate[] = [
   {
     id: 'summarize',

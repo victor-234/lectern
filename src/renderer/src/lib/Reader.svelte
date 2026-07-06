@@ -3,7 +3,12 @@
   import Icon from './Icon.svelte'
   import Editor from './Editor.svelte'
   import type { ResolvedPaper } from '../global'
-  import { PROMPT_TEMPLATES, type PromptTemplate } from './promptTemplates'
+  import {
+    PROMPT_TEMPLATES,
+    buildCustomPrompt,
+    buildMultiPrompt,
+    type PromptTemplate
+  } from './promptTemplates'
 
   let {
     tabs,
@@ -84,6 +89,100 @@
         title: tabTitle(activePaper)
       })
     )
+  }
+
+  // --- Custom prompt composer -------------------------------------------------
+  // A free-form prompt that ships with the active paper's context baked in (its
+  // title, path and citekey), so the user just fills in the instruction. Opened
+  // from the "Custom prompt…" row in the templates menu.
+  let customOpen = $state(false)
+  let customText = $state('')
+  let customArea = $state<HTMLTextAreaElement | null>(null)
+
+  function openCustomPrompt(): void {
+    promptMenuOpen = false
+    if (!activePaper) return
+    customText = ''
+    customOpen = true
+    // Focus once the textarea is in the DOM.
+    requestAnimationFrame(() => customArea?.focus())
+  }
+
+  function sendCustomPrompt(): void {
+    if (!activePaper || !customText.trim()) return
+    onPrompt?.(
+      buildCustomPrompt(
+        {
+          absPath: activePaper.absPath,
+          citekey: activePaper.citekey,
+          title: tabTitle(activePaper)
+        },
+        customText
+      )
+    )
+    customOpen = false
+    customText = ''
+  }
+
+  function onCustomKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      customOpen = false
+    } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      sendCustomPrompt()
+    }
+  }
+
+  // --- Multi-paper prompt composer --------------------------------------------
+  // Ask Claude about several open papers at once. Only offered when >1 tab is
+  // open. The composer lists the open tabs (whose PDF exists) as a checklist —
+  // all pre-selected — plus a free-form instruction; on send it bakes each
+  // selected paper's reference into the prompt.
+  let multiOpen = $state(false)
+  let multiSelected = $state<Set<string>>(new Set())
+  let multiText = $state('')
+  let multiArea = $state<HTMLTextAreaElement | null>(null)
+  // Only papers whose file exists can be referenced by path.
+  const promptableTabs = $derived(tabs.filter((t) => t.exists))
+  const canMultiPrompt = $derived(Boolean(onPrompt) && promptableTabs.length > 1)
+
+  function openMultiPrompt(): void {
+    promptMenuOpen = false
+    if (!canMultiPrompt) return
+    multiSelected = new Set(promptableTabs.map((t) => t.id))
+    multiText = ''
+    multiOpen = true
+    requestAnimationFrame(() => multiArea?.focus())
+  }
+
+  function toggleMulti(id: string): void {
+    const next = new Set(multiSelected)
+    next.has(id) ? next.delete(id) : next.add(id)
+    multiSelected = next
+  }
+
+  function sendMultiPrompt(): void {
+    const chosen = promptableTabs.filter((t) => multiSelected.has(t.id))
+    if (chosen.length < 1 || !multiText.trim()) return
+    onPrompt?.(
+      buildMultiPrompt(
+        chosen.map((p) => ({ absPath: p.absPath, citekey: p.citekey, title: tabTitle(p) })),
+        multiText
+      )
+    )
+    multiOpen = false
+    multiText = ''
+  }
+
+  function onMultiKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      multiOpen = false
+    } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      sendMultiPrompt()
+    }
   }
   let noteSaveError = $state<string | null>(null)
   const noteDirty = $derived(noteDraft !== noteSaved)
@@ -222,8 +321,28 @@
               <span>{t.label}</span>
             </button>
           {/each}
+          <div class="rtmpl-sep"></div>
+          <button class="rtmpl-item" role="menuitem" onclick={openCustomPrompt}>
+            <Icon n="pen" />
+            <span>Custom prompt…</span>
+          </button>
+          {#if canMultiPrompt}
+            <button class="rtmpl-item" role="menuitem" onclick={openMultiPrompt}>
+              <Icon n="cards" />
+              <span>Prompt multiple papers…</span>
+            </button>
+          {/if}
         </div>
       {/if}
+    {/if}
+    {#if canMultiPrompt}
+      <button
+        class="rtmpl-btn"
+        title="Ask Claude about several open papers at once"
+        onclick={openMultiPrompt}
+      >
+        <Icon n="cards" />Prompt multiple
+      </button>
     {/if}
     {#if tabs.length}
       <button
@@ -297,6 +416,87 @@
       </aside>
     {/if}
   </div>
+
+  {#if customOpen && activePaper}
+    <div class="cprompt-backdrop" role="presentation" onclick={() => (customOpen = false)}></div>
+    <div class="cprompt-layer" role="presentation">
+      <div class="cprompt" role="dialog" aria-label="Custom prompt">
+        <div class="cprompt-head">
+          <Icon n="sparkle" />
+          <span>Ask Claude about this paper</span>
+          <span class="cprompt-spacer"></span>
+          <button class="cprompt-x" title="Close (Esc)" onclick={() => (customOpen = false)}>×</button>
+        </div>
+        <!-- The paper's context (title / path / citekey) is baked into the prompt
+             automatically — this box just makes it visible. The user fills in the
+             instruction below. -->
+        <div class="cprompt-context" title={activePaper.absPath}>
+          <span class="cprompt-ctx-label">Context</span>
+          <span class="cprompt-ctx-title">{tabTitle(activePaper)}</span>
+          <span class="cprompt-ctx-cite">@{activePaper.citekey}</span>
+        </div>
+        <textarea
+          bind:this={customArea}
+          bind:value={customText}
+          class="cprompt-area"
+          placeholder="…what do you want to do with it? e.g. “compare its identification strategy to my methods section”"
+          onkeydown={onCustomKeydown}
+        ></textarea>
+        <div class="cprompt-foot">
+          <span class="cprompt-hint">⌘↵ to send · esc to cancel</span>
+          <button class="cprompt-send" disabled={!customText.trim()} onclick={sendCustomPrompt}>
+            <Icon n="sparkle" />Send to Claude
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if multiOpen}
+    <div class="cprompt-backdrop" role="presentation" onclick={() => (multiOpen = false)}></div>
+    <div class="cprompt-layer" role="presentation">
+      <div class="cprompt" role="dialog" aria-label="Prompt multiple papers">
+        <div class="cprompt-head">
+          <Icon n="cards" />
+          <span>Ask Claude about several papers</span>
+          <span class="cprompt-spacer"></span>
+          <button class="cprompt-x" title="Close (Esc)" onclick={() => (multiOpen = false)}>×</button>
+        </div>
+        <!-- Pick which of the open papers to include; each selected paper's
+             reference (title / path / citekey) is baked into the prompt. -->
+        <div class="mprompt-list">
+          {#each promptableTabs as p (p.id)}
+            <label class="mprompt-row" title={p.absPath}>
+              <input
+                type="checkbox"
+                checked={multiSelected.has(p.id)}
+                onchange={() => toggleMulti(p.id)}
+              />
+              <span class="mprompt-title">{tabTitle(p)}</span>
+              <span class="mprompt-cite">@{p.citekey}</span>
+            </label>
+          {/each}
+        </div>
+        <textarea
+          bind:this={multiArea}
+          bind:value={multiText}
+          class="cprompt-area"
+          placeholder="…what do you want to do across them? e.g. “compare their identification strategies and where they disagree”"
+          onkeydown={onMultiKeydown}
+        ></textarea>
+        <div class="cprompt-foot">
+          <span class="cprompt-hint">{multiSelected.size} selected · ⌘↵ to send · esc to cancel</span>
+          <button
+            class="cprompt-send"
+            disabled={!multiText.trim() || multiSelected.size < 1}
+            onclick={sendMultiPrompt}
+          >
+            <Icon n="sparkle" />Send to Claude
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -520,6 +720,195 @@
   }
   .rtmpl-item:hover :global(svg) {
     color: var(--accent);
+  }
+  .rtmpl-sep {
+    height: 1px;
+    margin: 4px 6px;
+    background: var(--border);
+  }
+
+  /* ---- Custom prompt composer ---- */
+  .cprompt-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0, 0, 0, 0.32);
+    backdrop-filter: blur(1.5px);
+    border: none;
+  }
+  .cprompt-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 41;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 16vh;
+    pointer-events: none;
+  }
+  .cprompt {
+    pointer-events: auto;
+    width: min(560px, 92vw);
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border-strong, var(--border));
+    border-radius: var(--r-lg, 12px);
+    box-shadow: var(--shadow-pop, 0 16px 48px rgba(0, 0, 0, 0.32));
+    overflow: hidden;
+  }
+  .cprompt-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .cprompt-head :global(svg) {
+    width: 14px;
+    height: 14px;
+    color: var(--accent);
+    flex: none;
+  }
+  .cprompt-spacer {
+    flex: 1;
+  }
+  .cprompt-x {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 17px;
+    line-height: 1;
+    padding: 0 2px;
+  }
+  .cprompt-x:hover {
+    color: var(--text);
+  }
+  .cprompt-context {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 14px;
+    background: var(--surface-inset);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .cprompt-ctx-label {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+  .cprompt-ctx-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .cprompt-ctx-cite {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--accent);
+  }
+  /* Multi-paper checklist (shares the composer chrome). */
+  .mprompt-list {
+    max-height: 190px;
+    overflow-y: auto;
+    padding: 6px;
+    background: var(--surface-inset);
+    border-bottom: 1px solid var(--border);
+  }
+  .mprompt-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 6px 8px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+  }
+  .mprompt-row:hover {
+    background: var(--surface);
+  }
+  .mprompt-row input {
+    flex: none;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .mprompt-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    color: var(--text);
+  }
+  .mprompt-cite {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--accent);
+  }
+
+  .cprompt-area {
+    resize: none;
+    min-height: 120px;
+    padding: 12px 14px;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .cprompt-foot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+  }
+  .cprompt-hint {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-faint);
+  }
+  .cprompt-send {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    background: var(--accent);
+    border: none;
+    border-radius: var(--r-sm);
+    color: var(--accent-fg, #fff);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .cprompt-send:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .cprompt-send :global(svg) {
+    width: 13px;
+    height: 13px;
   }
 
   /* ---- PDF stage + notes ---- */

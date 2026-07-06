@@ -79,9 +79,22 @@ const appIcon = nativeImage.createFromPath(join(RESOURCES, 'icon.png'))
 // keydown handler, so reading a paper and pressing ⌘W quit the app. Here ⌘W is a
 // custom item that asks the renderer to close the active reader tab; the renderer
 // only falls back to closing the window when no paper is open.
+//
+// The navigation shortcuts (app switching, reader-tab jumps, quick-open, …) also
+// live here as menu accelerators rather than renderer keydown handlers. The
+// in-app PDF reader is a Chromium PDFium plugin that swallows key events before
+// they reach the page, so a `<svelte:window onkeydown>` never sees ⌘/⌃ combos
+// while a PDF is focused. Menu accelerators fire app-globally regardless of what
+// has focus (that's why ⌘W works), so routing navigation through them makes the
+// tab switcher etc. work in the Reader too. Each item just relays an action
+// string to the renderer over `menu:shortcut`.
 function buildMenu(): void {
   const isMac = process.platform === 'darwin'
   const sendClose = (): void => mainWindow?.webContents.send('menu:close')
+  const go = (action: string): void => mainWindow?.webContents.send('menu:shortcut', action)
+  // Reader tabs jump on ⌘1–9 (mac) / ⌥1–9 (win/linux) so they don't collide with
+  // the ⌃1–3 app switcher below.
+  const tabAccel = (n: number): string => (isMac ? `Command+${n}` : `Alt+${n}`)
 
   const template: MenuItemConstructorOptions[] = [
     ...(isMac
@@ -96,6 +109,28 @@ function buildMenu(): void {
       ]
     },
     { role: 'editMenu' },
+    {
+      label: 'Go',
+      submenu: [
+        { label: 'Papers', accelerator: 'Control+1', click: () => go('app:papers') },
+        { label: 'Workspace', accelerator: 'Control+2', click: () => go('app:workspace') },
+        { label: 'Reader', accelerator: 'Control+3', click: () => go('app:reader') },
+        { label: 'Next App', accelerator: 'Control+Tab', click: () => go('app:next') },
+        { type: 'separator' as const },
+        { label: 'Open Paper…', accelerator: 'CmdOrCtrl+O', click: () => go('open') },
+        { label: 'Search Library', accelerator: 'CmdOrCtrl+K', click: () => go('search') },
+        { label: 'Toggle Terminal', accelerator: 'CmdOrCtrl+J', click: () => go('terminal') },
+        { type: 'separator' as const },
+        {
+          label: 'Reader Tab',
+          submenu: Array.from({ length: 9 }, (_, i) => ({
+            label: `Tab ${i + 1}`,
+            accelerator: tabAccel(i + 1),
+            click: () => go(`tab:${i}`)
+          }))
+        }
+      ]
+    },
     { role: 'viewMenu' },
     { role: 'windowMenu' }
   ]

@@ -12,6 +12,14 @@ const api = {
       ipcRenderer.on('menu:close', listener)
       return () => ipcRenderer.removeListener('menu:close', listener)
     },
+    // Navigation shortcuts relayed from the app menu's accelerators (they fire
+    // app-globally, so they work even while the PDF reader has focus). The
+    // payload is an action string, e.g. 'app:papers', 'open', 'tab:2'.
+    onShortcut: (cb: (action: string) => void): (() => void) => {
+      const listener = (_e: unknown, action: string): void => cb(action)
+      ipcRenderer.on('menu:shortcut', listener)
+      return () => ipcRenderer.removeListener('menu:shortcut', listener)
+    },
     closeWindow: (): void => ipcRenderer.send('window:close')
   },
   library: {

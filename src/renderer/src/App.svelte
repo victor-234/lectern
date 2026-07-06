@@ -12,6 +12,7 @@
   import TagManager from './lib/TagManager.svelte'
   import BulkRename from './lib/BulkRename.svelte'
   import ManualRefs from './lib/ManualRefs.svelte'
+  import QuickOpen from './lib/QuickOpen.svelte'
   import type { ProjectSummary, ResolvedPaper, ProjectPapers, Tag, Group, PaperPatch } from './global'
 
   type Sort = { key: string; dir: 'asc' | 'desc' }
@@ -54,6 +55,7 @@
   let bulkRenameOpen = $state(false) // bulk "rename files to house style" modal
   let manualRefsOpen = $state(false) // project manual-references (extra.bib) modal
   let projectMenuOpen = $state(false) // workspace project switcher
+  let quickOpen = $state(false) // ⌘O paper quick-open palette (opens into the Reader)
 
   // ---- data -----------------------------------------------------------------
   let projects = $state<ProjectSummary[]>([])
@@ -119,6 +121,38 @@
     if (mode === 'reader' && readerActiveId) closeReaderTab(readerActiveId)
     else window.api.app.closeWindow()
   })
+
+  // Navigation shortcuts arrive from the app menu's accelerators (see buildMenu
+  // in main). They fire app-globally — including while the PDF reader has focus,
+  // where a page-level keydown never would — so the tab switcher, reader-tab
+  // jumps and quick-open all work regardless of what's focused.
+  window.api.app.onShortcut(runShortcut)
+  function runShortcut(action: string): void {
+    if (action === 'app:papers') setMode('papers')
+    else if (action === 'app:workspace') setMode('workspace')
+    else if (action === 'app:reader') setMode('reader')
+    else if (action === 'app:next') toggleMode()
+    else if (action === 'open') quickOpen = true
+    else if (action === 'search') focusSearch()
+    else if (action === 'terminal') termOpen = !termOpen
+    else if (action.startsWith('tab:')) {
+      const i = parseInt(action.slice(4), 10)
+      if (i < readerTabs.length) {
+        readerActiveId = readerTabs[i].id
+        mode = 'reader'
+      }
+    }
+  }
+
+  // ⌘K: reveal the Papers sidebar (so the input exists) then focus it.
+  function focusSearch(): void {
+    mode = 'papers'
+    paperSidebarOn = true
+    requestAnimationFrame(() => {
+      searchEl?.focus()
+      searchEl?.select()
+    })
+  }
 
   async function loadProjects(): Promise<void> {
     projects = await window.api.projects.list()
@@ -491,26 +525,13 @@
   }
 
   // ---- keyboard --------------------------------------------------------------
+  // Navigation shortcuts (⌃Tab app cycle, ⌃1–3 app switch, ⌘1–9 reader tabs,
+  // ⌘O quick-open, ⌘K search, ⌘J terminal, ⌘W close) live on the app menu's
+  // accelerators (see buildMenu in main → runShortcut above) so they keep
+  // working while the PDF reader has focus. What's left here are the
+  // Workspace-context keys, which only fire while writing (main frame focused).
   function onkeydown(e: KeyboardEvent): void {
-    // ⌃Tab cycles forward through the visible app buttons (incl. Reader if open).
-    if (e.ctrlKey && e.key === 'Tab') {
-      e.preventDefault()
-      toggleMode()
-      return
-    }
     const mod = e.metaKey || e.ctrlKey
-    // ⌘1–9 jumps straight to a reader tab (entering Reader mode if needed).
-    if (mod && readerTabs.length && /^[1-9]$/.test(e.key)) {
-      const i = parseInt(e.key, 10) - 1
-      if (i < readerTabs.length) {
-        e.preventDefault()
-        readerActiveId = readerTabs[i].id
-        mode = 'reader'
-      }
-      return
-    }
-    // ⌘W is handled by the File ▸ Close menu item (see onCloseRequest above);
-    // the menu accelerator intercepts it before this handler runs.
     if (mod && e.key.toLowerCase() === 'r') {
       // ⌘R renders the current manuscript/slides to PDF (overrides the default
       // page reload). Only meaningful while writing in the Workspace.
@@ -520,16 +541,6 @@
       // ⌘L toggles the render-log panel in the Workspace.
       e.preventDefault()
       if (mode === 'workspace' && selected) quartoRef?.toggleLog()
-    } else if (mod && e.key.toLowerCase() === 'j') {
-      e.preventDefault()
-      termOpen = !termOpen
-    } else if (mod && e.key.toLowerCase() === 'k') {
-      // ⌘K focuses library search — reveal the Papers sidebar first so the
-      // input exists, then focus it once Svelte has rendered.
-      e.preventDefault()
-      mode = 'papers'
-      paperSidebarOn = true
-      requestAnimationFrame(() => { searchEl?.focus(); searchEl?.select() })
     } else if (mod && e.altKey && e.key.toLowerCase() === 'b') {
       // ⌘⌥B: outline in Workspace; inspector (right panel) in Papers.
       e.preventDefault()
@@ -601,11 +612,11 @@
       <span class="tb-div" aria-hidden="true"></span>
 
       <!-- App switcher (⌃Tab) -->
-      <div class="tb-seg tb-seg--text" title="Switch app (⌃Tab)">
-        <button data-on={mode === 'papers'} onclick={() => setMode('papers')}>Papers</button>
-        <button data-on={mode === 'workspace'} onclick={() => setMode('workspace')}>Workspace</button>
+      <div class="tb-seg tb-seg--text" title="Switch app (⌃Tab, or ⌃1–3)">
+        <button data-on={mode === 'papers'} title="Papers (⌃1)" onclick={() => setMode('papers')}>Papers</button>
+        <button data-on={mode === 'workspace'} title="Workspace (⌃2)" onclick={() => setMode('workspace')}>Workspace</button>
         {#if readerTabs.length}
-          <button data-on={mode === 'reader'} title="Read PDFs (⌘1–9)" onclick={() => setMode('reader')}>Reader</button>
+          <button data-on={mode === 'reader'} title="Reader (⌃3) · jump to a tab with ⌘1–9" onclick={() => setMode('reader')}>Reader</button>
         {/if}
       </div>
 
@@ -873,6 +884,14 @@
       {/if}
     </div>
   </div>
+
+  {#if quickOpen}
+    <QuickOpen
+      papers={libraryPapers}
+      onopen={openInReader}
+      onclose={() => (quickOpen = false)}
+    />
+  {/if}
 
   {#if onboarding}
     <Onboarding oncreated={onProjectCreated} onclose={() => (onboarding = false)} />
