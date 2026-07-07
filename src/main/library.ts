@@ -1013,6 +1013,15 @@ export async function enrichLibrary(root: string, onProgress?: () => void): Prom
       applyMeta(reg, target, meta)
       await writeRegistry(root, reg)
       await regenerateMasterBib(root)
+      // Now that we have real metadata, put the on-disk file into house style
+      // (e.g. "Wagner et al. 2024 JFE, Corp governance.pdf"). Best-effort: a
+      // paper too sparse to name, already in style, or outside sources/ just
+      // keeps its filename, and a rename hiccup never derails enrichment.
+      try {
+        await renamePaperToHouseStyle(root, target.id)
+      } catch {
+        // leave the filename as-is — the metadata itself was saved above
+      }
       onProgress?.()
     }
   } finally {
