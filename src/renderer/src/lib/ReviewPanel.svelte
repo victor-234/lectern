@@ -285,6 +285,15 @@
     <div class="rv-error">⚠ {error}</div>
   {/if}
 
+  <!-- A failed snapshot is otherwise indistinguishable from a quiet one: both
+       show an empty list. Say which it is. -->
+  {#if state?.error}
+    <div class="rv-warn">
+      ⚠ The last checkpoint couldn't be taken, so changes since then aren't
+      tracked — {state.error}
+    </div>
+  {/if}
+
   <div class="rv-body">
     {#if !state}
       <div class="rv-blank">Loading…</div>
@@ -471,6 +480,13 @@
     font-size: 12px;
     color: var(--danger);
     background: var(--danger-bg);
+  }
+  .rv-warn {
+    padding: 8px 16px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--warning);
+    background: var(--warning-bg);
   }
   .rv-body {
     flex: 1;

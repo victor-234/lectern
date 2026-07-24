@@ -337,7 +337,16 @@ app.whenReady().then(() => {
   // --- Projects ---
   ipcMain.handle('projects:list', async () => {
     const root = await getLibraryRoot()
-    return root ? listProjects(root) : []
+    if (!root) return []
+    const projects = await listProjects(root)
+    // Backfill checkpoint hooks into every project. This is the install point
+    // that actually runs: the renderer loads the project list on boot and after
+    // any library change, whereas `project:info` has no caller at all. Claude
+    // Code picks up a settings.json change with its own file watcher, so a
+    // session already running in the terminal starts checkpointing without
+    // being restarted. Idempotent and off the critical path.
+    void Promise.all(projects.map((p) => ensureCheckpointHooks(p.path)))
+    return projects
   })
   ipcMain.handle('project:create', async (_e, args: { name: string; meta: ProjectMeta }) => {
     const root = await getLibraryRoot()

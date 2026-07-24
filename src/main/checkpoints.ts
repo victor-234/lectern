@@ -54,6 +54,12 @@ export interface ReviewState {
   /** Set when the folder is a repo but has no commits yet — snapshots still work. */
   empty: boolean
   checkpoints: Checkpoint[]
+  /**
+   * Why the last snapshot failed, if it did. Without this a broken checkpoint
+   * looks exactly like a quiet one — the panel says "nothing to review" whether
+   * Claude changed nothing or the snapshot never ran.
+   */
+  error?: string
 }
 
 interface StoredCheckpoint {
@@ -104,11 +110,13 @@ interface RepoContext {
 }
 
 /**
- * Pathspec limiting every snapshot and diff to the project — minus `.lctrn/`,
- * which is Lectern's own state. The checkpoint log lives in there and rewrites
- * itself on every turn, so without this exclusion each review would list
+ * Pathspec limiting a *diff* to the project — minus `.lctrn/`, which is
+ * Lectern's own state. The checkpoint log lives in there and rewrites itself on
+ * every turn, so without this exclusion each review would list
  * `.lctrn/checkpoints.json` as one of Claude's edits, no turn would ever look
  * empty, and "Revert all" would roll back the review log itself.
+ *
+ * Note this is deliberately NOT used for `git add` — see dropLctrnFromIndex.
  */
 function scope(ctx: RepoContext): string[] {
   return ['--', ctx.prefix || '.', `:(exclude)${ctx.prefix}.lctrn/`]
@@ -175,7 +183,19 @@ async function writeSnapshot(projectPath: string, ctx: RepoContext): Promise<str
   } else {
     await run(['read-tree', '--empty'])
   }
-  await run(['add', '-A', ...scope(ctx)])
+  // Stage the project, then drop Lectern's own state from the index.
+  //
+  // This deliberately does *not* use an `:(exclude).lctrn/` pathspec on `add`.
+  // Most projects gitignore `.lctrn`, and naming an ignored path in a pathspec —
+  // even an excluding one — makes `git add` abort with "The following paths are
+  // ignored by one of your .gitignore files". That killed every snapshot in a
+  // real project while working fine in a scratch repo without the ignore rule.
+  // Staging broadly and unstaging after is layout- and gitignore-independent.
+  await run(['add', '-A', '--', ctx.prefix || '.'])
+  // `-f` because the index we are writing lives in `.lctrn` itself, so git sees
+  // staged content differing from both the file and HEAD and refuses without it.
+  // `--cached` means this only ever unstages — the working tree is never touched.
+  await run(['rm', '--cached', '-r', '-f', '-q', '--ignore-unmatch', '--', `${ctx.prefix}.lctrn`])
 
   const tree = (await run(['write-tree'])).trim()
   const commit = (await run(['commit-tree', tree, '-m', 'lctrn checkpoint'])).trim()
@@ -233,8 +253,30 @@ export async function recordCheckpoint(
   sessionId: string | null
 ): Promise<void> {
   const ctx = await repoContext(projectPath)
-  if (!ctx) return
+  if (!ctx) {
+    lastError.set(projectPath, 'Not a git repository — checkpoints need one to store snapshots.')
+    return
+  }
 
+  try {
+    await snapshotTurn(projectPath, ctx, label, sessionId)
+    lastError.delete(projectPath)
+  } catch (e) {
+    // Never rethrow: the hook is waiting on this and must not stall the turn.
+    // Recording why lets the panel say so instead of showing an empty list.
+    lastError.set(projectPath, (e as Error).message.split('\n')[0].slice(0, 300))
+  }
+}
+
+/** Per-project reason the last snapshot failed. Cleared by the next success. */
+const lastError = new Map<string, string>()
+
+async function snapshotTurn(
+  projectPath: string,
+  ctx: RepoContext,
+  label: string,
+  sessionId: string | null
+): Promise<void> {
   await serialize(projectPath, async () => {
     const commit = await writeSnapshot(projectPath, ctx)
     const id = `${Date.now().toString(36)}-${commit.slice(0, 8)}`
@@ -334,8 +376,11 @@ export async function reviewState(projectPath: string): Promise<ReviewState> {
   if (!ctx) return NOT_A_REPO
 
   return serialize(projectPath, async () => {
+    const err = lastError.get(projectPath)
     const store = await readStore(projectPath)
-    if (!store.length) return { repo: true, empty: !(await hasCommits(ctx.root)), checkpoints: [] }
+    if (!store.length) {
+      return { repo: true, empty: !(await hasCommits(ctx.root)), checkpoints: [], error: err }
+    }
 
     const live = await writeSnapshot(projectPath, ctx)
     const out: Checkpoint[] = []
@@ -372,7 +417,7 @@ export async function reviewState(projectPath: string): Promise<ReviewState> {
     }
 
     out.reverse()
-    return { repo: true, empty: false, checkpoints: out }
+    return { repo: true, empty: false, checkpoints: out, error: err }
   })
 }
 
