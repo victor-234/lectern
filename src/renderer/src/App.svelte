@@ -12,6 +12,7 @@
   import TagManager from './lib/TagManager.svelte'
   import BulkRename from './lib/BulkRename.svelte'
   import ManualRefs from './lib/ManualRefs.svelte'
+  import ReviewPanel from './lib/ReviewPanel.svelte'
   import QuickOpen from './lib/QuickOpen.svelte'
   import type { ProjectSummary, ResolvedPaper, ProjectPapers, Tag, Group, PaperPatch } from './global'
 
@@ -53,6 +54,10 @@
   let inquiriesOpen = $state(false) // library-level "talk to your literature" modal
   let bulkRenameOpen = $state(false) // bulk "rename files to house style" modal
   let manualRefsOpen = $state(false) // project manual-references (extra.bib) modal
+  let reviewOpen = $state(false) // checkpoint review of Claude's edits
+  // Unreviewed turns, shown on the toolbar chip. Recomputed on project switch
+  // and whenever a turn starts or ends — no polling; the hook bridge tells us.
+  let reviewCount = $state(0)
   let projectMenuOpen = $state(false) // workspace project switcher
   let quickOpen = $state(false) // ⌘O paper quick-open palette (opens into the Reader)
 
@@ -73,6 +78,25 @@
   let tagManagerOpen = $state(false)
   let projectPapers = $state<ProjectPapers>({ selected: [], available: [] })
   let adding = $state(false)
+
+  // ---- checkpoint review ------------------------------------------------------
+  async function refreshReviewCount(): Promise<void> {
+    const pp = selected?.path
+    if (!pp) {
+      reviewCount = 0
+      return
+    }
+    const s = await window.api.projects.review.state(pp)
+    if (pp === selected?.path) reviewCount = s.checkpoints.length
+  }
+  $effect(() => {
+    selected?.path
+    reviewCount = 0
+    void refreshReviewCount()
+    return window.api.projects.review.onChanged((p) => {
+      if (p === selected?.path) void refreshReviewCount()
+    })
+  })
 
   // ---- reader (tabbed PDF view) ---------------------------------------------
   // Papers the user has explicitly opened, in tab order. ⌘1–9 jumps to a tab.
@@ -596,7 +620,7 @@
 {:else if !libraryRoot}
   <LibrarySetup onready={onLibraryReady} />
 {:else}
-  <div class="lx-app" class:modal-open={manualRefsOpen}>
+  <div class="lx-app" class:modal-open={manualRefsOpen || reviewOpen}>
     <!-- ---- Top bar (nav + toolbar consolidated into one row) ----
          Zones, left→right, split by hairline dividers like the Slides bar:
          identity · app switcher ‖ contextual context … contextual actions ‖
@@ -646,6 +670,15 @@
         {#if selected}
           <button class="btn btn--ghost" title="Add references that live outside the library (policy articles, web pages, …)" onclick={() => (manualRefsOpen = true)}>
             <Icon n="file" />References
+          </button>
+          <button
+            class="btn btn--ghost"
+            class:btn--active={reviewOpen}
+            title="Review what Claude changed, turn by turn — keep or revert per file"
+            onclick={() => (reviewOpen = true)}
+          >
+            <Icon n="diff" />Review
+            {#if reviewCount}<span class="tb-count">{reviewCount}</span>{/if}
           </button>
           <GitPanel projectPath={selected.path} />
         {/if}
@@ -892,6 +925,10 @@
 
   {#if onboarding}
     <Onboarding oncreated={onProjectCreated} onclose={() => (onboarding = false)} />
+  {/if}
+
+  {#if reviewOpen && selected}
+    <ReviewPanel projectPath={selected.path} onclose={() => (reviewOpen = false)} />
   {/if}
 
   {#if manualRefsOpen && selected}

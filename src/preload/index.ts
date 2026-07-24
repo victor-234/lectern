@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { UpdatePaperResult } from '../main/library'
 import type { ExtractedMeta } from '../main/metadata'
 import type { GitStatus, GitSyncResult } from '../main/git'
+import type { ReviewState } from '../main/checkpoints'
 
 const api = {
   // App-level window/menu wiring.
@@ -163,6 +164,36 @@ const api = {
         ipcRenderer.invoke('project:git:status', { projectPath, fetch }),
       sync: (projectPath: string): Promise<GitSyncResult> =>
         ipcRenderer.invoke('project:git:sync', projectPath)
+    },
+    // Checkpoint review: what Claude changed, grouped by the prompt that caused
+    // it, with keep/revert per file. Snapshots are taken by Claude Code hooks
+    // reporting into the app's loopback bridge — see main/checkpoints.ts.
+    review: {
+      state: (projectPath: string): Promise<ReviewState> =>
+        ipcRenderer.invoke('project:review:state', projectPath),
+      /** Unified patch for one file in one turn. */
+      patch: (projectPath: string, id: string, path: string): Promise<string> =>
+        ipcRenderer.invoke('project:review:patch', { projectPath, id, path }),
+      /** Accept a turn — the edits stay, it stops showing up for review. */
+      keep: (projectPath: string, id: string): Promise<void> =>
+        ipcRenderer.invoke('project:review:keep', { projectPath, id }),
+      revertFile: (
+        projectPath: string,
+        id: string,
+        path: string
+      ): Promise<{ ok: boolean; error?: string }> =>
+        ipcRenderer.invoke('project:review:revertFile', { projectPath, id, path }),
+      revert: (projectPath: string, id: string): Promise<{ ok: boolean; error?: string }> =>
+        ipcRenderer.invoke('project:review:revert', { projectPath, id }),
+      init: (projectPath: string): Promise<{ ok: boolean; error?: string }> =>
+        ipcRenderer.invoke('project:review:init', projectPath),
+      // Fires when a turn starts or ends in any embedded session, so the panel
+      // can refresh without polling. Carries the project the turn ran in.
+      onChanged: (cb: (projectPath: string) => void): (() => void) => {
+        const listener = (_e: unknown, projectPath: string): void => cb(projectPath)
+        ipcRenderer.on('project:review:changed', listener)
+        return () => ipcRenderer.removeListener('project:review:changed', listener)
+      }
     },
     render: (projectPath: string, which: 'manuscript' | 'slides', format: 'pdf' | 'html' | 'revealjs') =>
       ipcRenderer.invoke('project:render', { projectPath, which, format }),

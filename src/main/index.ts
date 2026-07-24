@@ -54,12 +54,16 @@ import { registerProjectFiles, projectPdfPath } from './projectFiles'
 import { registerRevising } from './revising'
 import { registerExtraRefs } from './extraRefs'
 import { registerGit } from './git'
+import { registerCheckpoints, ensureCheckpointHooks } from './checkpoints'
+import { startBridge } from './bridge'
 
 let mainWindow: BrowserWindow | null = null
 
 // Kills all embedded PTYs; wired to registerPty in app.whenReady. Called when the
 // window closes so buffered shell output can't fire into a destroyed webContents.
 let killPtys: () => void = () => {}
+// Shuts down the Claude Code hook bridge; wired to startBridge in app.whenReady.
+let stopBridge: () => void = () => {}
 
 // Custom scheme that streams library PDFs to the in-app reader. Registered as a
 // standard, secure scheme (before app-ready) so Chromium's PDFium viewer treats
@@ -338,9 +342,16 @@ app.whenReady().then(() => {
   ipcMain.handle('project:create', async (_e, args: { name: string; meta: ProjectMeta }) => {
     const root = await getLibraryRoot()
     if (!root) return { ok: false, error: 'No library configured.' }
-    return createProject(root, args.name, args.meta, new Date().toISOString())
+    const created = await createProject(root, args.name, args.meta, new Date().toISOString())
+    if (created.projectPath) await ensureCheckpointHooks(created.projectPath)
+    return created
   })
-  ipcMain.handle('project:info', (_e, projectPath: string) => readProjectInfo(projectPath))
+  ipcMain.handle('project:info', async (_e, projectPath: string) => {
+    // Opening a project is also where checkpoint hooks get backfilled into
+    // projects scaffolded before checkpoint review existed. Idempotent.
+    void ensureCheckpointHooks(projectPath)
+    return readProjectInfo(projectPath)
+  })
   ipcMain.handle('project:doc:get', (_e, args: { projectPath: string; which: DocKind }) =>
     readDoc(args.projectPath, args.which)
   )
@@ -419,6 +430,16 @@ app.whenReady().then(() => {
   // --- Mini source control (status chip + one-click commit/pull/push) ---
   registerGit(ipcMain)
 
+  // --- Checkpoint review (snapshot per turn, keep/revert per file) ---
+  registerCheckpoints(ipcMain, () => mainWindow)
+  // The loopback endpoint Claude Code's hooks report turn boundaries to. Best
+  // effort: without it edits still happen, they just aren't grouped by prompt.
+  startBridge(() => mainWindow)
+    .then(({ stop }) => {
+      stopBridge = stop
+    })
+    .catch(() => {})
+
   createWindow()
 
   // Start watching .sources/ if a library is already configured.
@@ -434,3 +455,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
+
+// Take the published bridge address down with the app, so a hook firing after
+// quit finds nothing and exits silently instead of reaching a recycled port.
+app.on('will-quit', () => stopBridge())
