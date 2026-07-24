@@ -30,6 +30,8 @@ export interface ConfigFileSpec {
 export interface ConfigFileInfo extends ConfigFileSpec {
   exists: boolean
   curated: boolean
+  /** Markdown files open in the split editor; PDFs in an embedded viewer. */
+  kind: 'md' | 'pdf'
 }
 
 export interface ConfigFile {
@@ -162,6 +164,19 @@ function safePath(projectPath: string, name: string): string {
   return abs
 }
 
+/**
+ * Resolve a project-relative PDF path for the `lctrn-pdf://project/…` protocol,
+ * with the same containment guard as `safePath` but for `.pdf`.
+ */
+export function projectPdfPath(projectPath: string, name: string): string {
+  const root = resolve(projectPath)
+  const abs = resolve(root, name)
+  if (!abs.startsWith(root + sep) || !abs.toLowerCase().endsWith('.pdf')) {
+    throw new Error(`refusing to serve PDF outside the project: ${name}`)
+  }
+  return abs
+}
+
 // --- Read / write ------------------------------------------------------------
 
 export async function readProjectFile(projectPath: string, name: string): Promise<ConfigFile> {
@@ -189,8 +204,24 @@ export async function saveProjectFile(
 }
 
 /**
+ * Delete a project file (markdown or PDF) from disk. The front-matter entry is
+ * virtual — a slice of manuscript.qmd — and cannot be deleted.
+ */
+export async function deleteProjectFile(projectPath: string, name: string): Promise<void> {
+  if (name === FRONTMATTER_NAME) {
+    throw new Error('The manuscript front matter is part of manuscript.qmd and cannot be deleted.')
+  }
+  const abs = name.toLowerCase().endsWith('.pdf')
+    ? projectPdfPath(projectPath, name)
+    : safePath(projectPath, name)
+  await fs.rm(abs)
+}
+
+/**
  * The curated config files (flagged by existence) plus any other root-level
- * `*.md` the user has added, so ad-hoc config files surface here too.
+ * `*.md` the user has added, so ad-hoc config files surface here too — and any
+ * root-level `*.pdf` (most usefully the rendered manuscript), shown in an
+ * embedded viewer rather than the editor.
  */
 export async function listConfigFiles(projectPath: string): Promise<ConfigFileInfo[]> {
   const root = resolve(projectPath)
@@ -206,7 +237,7 @@ export async function listConfigFiles(projectPath: string): Promise<ConfigFileIn
     } catch {
       exists = false
     }
-    out.push({ ...spec, exists, curated: true })
+    out.push({ ...spec, exists, curated: true, kind: 'md' })
   }
 
   // Virtual entry: the manuscript's YAML front matter (a slice of manuscript.qmd).
@@ -214,10 +245,11 @@ export async function listConfigFiles(projectPath: string): Promise<ConfigFileIn
     name: FRONTMATTER_NAME,
     label: 'Manuscript front matter',
     exists: (await readFrontMatter(projectPath)).exists,
-    curated: true
+    curated: true,
+    kind: 'md'
   })
 
-  // Discover extra root-level markdown files not already covered.
+  // Discover extra root-level markdown files not already covered, then PDFs.
   let entries: string[] = []
   try {
     entries = await fs.readdir(root)
@@ -233,8 +265,13 @@ export async function listConfigFiles(projectPath: string): Promise<ConfigFileIn
       name: f,
       label: f.replace(/\.md$/i, ''),
       exists: true,
-      curated: false
+      curated: false,
+      kind: 'md'
     })
+  }
+  for (const f of entries.sort()) {
+    if (!f.toLowerCase().endsWith('.pdf')) continue
+    out.push({ name: f, label: f, exists: true, curated: false, kind: 'pdf' })
   }
   return out
 }
@@ -248,5 +285,8 @@ export function registerProjectFiles(ipcMain: IpcMain): void {
     'project:file:save',
     (_e, args: { projectPath: string; name: string; content: string }) =>
       saveProjectFile(args.projectPath, args.name, args.content)
+  )
+  ipcMain.handle('project:file:delete', (_e, args: { projectPath: string; name: string }) =>
+    deleteProjectFile(args.projectPath, args.name)
   )
 }

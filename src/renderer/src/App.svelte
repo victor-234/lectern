@@ -6,7 +6,7 @@
   import PaperTable from './lib/PaperTable.svelte'
   import Inspector from './lib/Inspector.svelte'
   import QuartoView from './lib/QuartoView.svelte'
-  import ConfigFiles from './lib/ConfigFiles.svelte'
+  import GitPanel from './lib/GitPanel.svelte'
   import Inquiries from './lib/Inquiries.svelte'
   import Reader from './lib/Reader.svelte'
   import TagManager from './lib/TagManager.svelte'
@@ -50,7 +50,6 @@
   })
   let termOpen = $state(true)
   let onboarding = $state(false)
-  let configOpen = $state(false) // project config-files editor modal
   let inquiriesOpen = $state(false) // library-level "talk to your literature" modal
   let bulkRenameOpen = $state(false) // bulk "rename files to house style" modal
   let manualRefsOpen = $state(false) // project manual-references (extra.bib) modal
@@ -645,12 +644,10 @@
           {/if}
         </div>
         {#if selected}
-          <button class="btn btn--ghost" title="Edit project config files (revision plan, writing style, …)" onclick={() => (configOpen = true)}>
-            <Icon n="file" />Config
-          </button>
           <button class="btn btn--ghost" title="Add references that live outside the library (policy articles, web pages, …)" onclick={() => (manualRefsOpen = true)}>
             <Icon n="file" />References
           </button>
+          <GitPanel projectPath={selected.path} />
         {/if}
         <span class="tb-spacer"></span>
         {#if selected}
@@ -895,10 +892,6 @@
 
   {#if onboarding}
     <Onboarding oncreated={onProjectCreated} onclose={() => (onboarding = false)} />
-  {/if}
-
-  {#if configOpen && selected}
-    <ConfigFiles projectPath={selected.path} onclose={() => (configOpen = false)} />
   {/if}
 
   {#if manualRefsOpen && selected}

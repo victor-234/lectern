@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { UpdatePaperResult } from '../main/library'
 import type { ExtractedMeta } from '../main/metadata'
+import type { GitStatus, GitSyncResult } from '../main/git'
 
 const api = {
   // App-level window/menu wiring.
@@ -104,7 +105,16 @@ const api = {
       get: (projectPath: string, name: string) =>
         ipcRenderer.invoke('project:file:get', { projectPath, name }),
       save: (projectPath: string, name: string, content: string) =>
-        ipcRenderer.invoke('project:file:save', { projectPath, name, content })
+        ipcRenderer.invoke('project:file:save', { projectPath, name, content }),
+      delete: (projectPath: string, name: string) =>
+        ipcRenderer.invoke('project:file:delete', { projectPath, name }),
+      // Fires when a project markdown file changes on disk (e.g. Claude editing
+      // LEARNED_EDITS.md in the terminal), with the project-relative name.
+      onChanged: (cb: (name: string) => void): (() => void) => {
+        const listener = (_e: unknown, name: string): void => cb(name)
+        ipcRenderer.on('project:files:changed', listener)
+        return () => ipcRenderer.removeListener('project:files:changed', listener)
+      }
     },
     // Revising mode (track-changes → LEARNED_EDITS.md). Toggling off returns a
     // kickoff prompt to drop into the embedded terminal for the learn-edits run.
@@ -146,6 +156,13 @@ const api = {
         ipcRenderer.invoke('project:extraRefs:update', { projectPath, citekey, ref }),
       delete: (projectPath: string, citekey: string) =>
         ipcRenderer.invoke('project:extraRefs:delete', { projectPath, citekey })
+    },
+    // Mini source control: status chip + one-click sync (commit → pull → push).
+    git: {
+      status: (projectPath: string, fetch = false): Promise<GitStatus> =>
+        ipcRenderer.invoke('project:git:status', { projectPath, fetch }),
+      sync: (projectPath: string): Promise<GitSyncResult> =>
+        ipcRenderer.invoke('project:git:sync', projectPath)
     },
     render: (projectPath: string, which: 'manuscript' | 'slides', format: 'pdf' | 'html' | 'revealjs') =>
       ipcRenderer.invoke('project:render', { projectPath, which, format }),

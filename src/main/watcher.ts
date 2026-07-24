@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from 'chokidar'
 import type { BrowserWindow } from 'electron'
 import { promises as fs } from 'fs'
-import { join, basename } from 'path'
+import { join, basename, relative, sep } from 'path'
 import { enrichLibrary, sourcesDir, syncLibrary } from './library'
 import { inquiriesDir } from './inquiries'
 import { FILES } from './quarto'
@@ -79,6 +79,11 @@ export async function stopWatchingLibrary(): Promise<void> {
  * renderer re-reads and reconciles against its in-editor draft (it ignores the
  * app's own saves and never clobbers unsaved edits). Only one project is watched
  * at a time — calling again retargets; passing null stops.
+ *
+ * The project root (depth 0) plus the two curated nested config files are also
+ * watched so root-level `*.md` edits — Claude updating LEARNED_EDITS.md, the
+ * revision plan, etc. — emit `project:files:changed` with the project-relative
+ * name for the workspace file pane / side editor.
  */
 export async function watchProjectDocs(
   projectPath: string | null,
@@ -93,8 +98,14 @@ export async function watchProjectDocs(
   // Also watch MANUSCRIPT_NOTES.md so the Notes panel refreshes when Claude (the
   // address-notes skill) marks notes done — done notes then drop out of the panel.
   paths.push(join(projectPath, NOTES_FILE))
+  // Root-level markdown config files and PDFs (depth 0 keeps _files dirs etc.
+  // out), plus the curated nested ones the file pane lists.
+  paths.push(projectPath)
+  paths.push(join(projectPath, 'revisions', 'revision-plan.md'))
+  paths.push(join(projectPath, '.claude', 'CLAUDE.md'))
   docWatcher = watch(paths, {
     ignoreInitial: true,
+    depth: 0,
     awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 100 }
   })
 
@@ -105,10 +116,21 @@ export async function watchProjectDocs(
       return
     }
     const which = (Object.keys(FILES) as Array<keyof typeof FILES>).find((k) => FILES[k] === file)
-    if (which) getWindow()?.webContents.send('project:doc:changed', which)
+    if (which) {
+      getWindow()?.webContents.send('project:doc:changed', which)
+      return
+    }
+    const lower = file.toLowerCase()
+    if (lower.endsWith('.md') || lower.endsWith('.pdf')) {
+      // Project-relative, forward-slashed — matches the config-file names used
+      // by project:files:list (e.g. `revisions/revision-plan.md`).
+      const name = relative(projectPath, path).split(sep).join('/')
+      getWindow()?.webContents.send('project:files:changed', name)
+    }
   }
   docWatcher.on('add', notify)
   docWatcher.on('change', notify)
+  docWatcher.on('unlink', notify)
 }
 
 export async function stopWatchingProjectDocs(): Promise<void> {

@@ -50,9 +50,10 @@ import { watchLibrarySources, watchProjectDocs } from './watcher'
 import { readDoc, saveDoc, registerQuarto, type DocKind } from './quarto'
 import { registerNotes } from './notes'
 import { registerPaperNotes } from './paperNotes'
-import { registerProjectFiles } from './projectFiles'
+import { registerProjectFiles, projectPdfPath } from './projectFiles'
 import { registerRevising } from './revising'
 import { registerExtraRefs } from './extraRefs'
+import { registerGit } from './git'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -180,10 +181,22 @@ app.whenReady().then(() => {
   // Renderer's fallback for ⌘W (the File ▸ Close menu item) when no paper is open.
   ipcMain.on('window:close', () => mainWindow?.close())
 
-  // Serve library PDFs for the reader. Resolves by paper id through the registry
-  // (never a renderer-supplied path), then streams the file via net.fetch.
+  // Serve PDFs to in-app iframes. Two shapes:
+  //   lctrn-pdf://paper/<id>                          — library paper, resolved
+  //     by id through the registry (never a renderer-supplied path)
+  //   lctrn-pdf://project/<projectPath>/<name>        — a PDF inside a project
+  //     (e.g. the rendered manuscript), path-contained via projectPdfPath
   protocol.handle('lctrn-pdf', async (request) => {
-    const id = decodeURIComponent(new URL(request.url).pathname.replace(/^\//, ''))
+    const url = new URL(request.url)
+    if (url.hostname === 'project') {
+      const [pp, name] = url.pathname.replace(/^\//, '').split('/').map(decodeURIComponent)
+      try {
+        return await net.fetch(pathToFileURL(projectPdfPath(pp, name)).toString())
+      } catch {
+        return new Response('Not found', { status: 404 })
+      }
+    }
+    const id = decodeURIComponent(url.pathname.replace(/^\//, ''))
     const root = await getLibraryRoot()
     const abs = root ? await paperAbsPath(root, id) : null
     if (!abs) return new Response('Not found', { status: 404 })
@@ -402,6 +415,9 @@ app.whenReady().then(() => {
 
   // --- Per-project manual references (.lctrn/extra-refs.json → extra.bib) ---
   registerExtraRefs(ipcMain)
+
+  // --- Mini source control (status chip + one-click commit/pull/push) ---
+  registerGit(ipcMain)
 
   createWindow()
 

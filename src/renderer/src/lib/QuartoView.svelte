@@ -1,5 +1,7 @@
 <script lang="ts">
   import Editor from './Editor.svelte'
+  import FilePane from './FilePane.svelte'
+  import SideFile from './SideFile.svelte'
   import Icon from './Icon.svelte'
   import type { QuartoDoc, ResolvedPaper, ManuscriptNote, CellOutput } from '../global'
 
@@ -190,6 +192,15 @@
   let editorRef = $state<{
     revealLines: (line: number, endLine: number) => void
   } | null>(null)
+
+  // --- Side file (split editor) ---
+  // A project markdown file (revision plan, LEARNED_EDITS.md, …) opened from the
+  // file pane and shown in a second editor beside the manuscript. One at a time;
+  // clicking the open file again closes the split.
+  let sideFile = $state<string | null>(null)
+  function openSideFile(name: string): void {
+    sideFile = sideFile === name ? null : name
+  }
 
   // --- Manuscript margin notes (right panel + MANUSCRIPT_NOTES.md) ---
   const notesEnabled = $derived(which === 'manuscript')
@@ -683,27 +694,37 @@
       <div class="qv-loading">Loading {label.toLowerCase()}…</div>
     {:else}
       {#if showOutline}
-        <aside class="outline">
-          <div class="outline-head">Outline</div>
-          {#if outline.length === 0}
-            <div class="outline-empty">
-              No headings yet. Start a line with <code>#</code>, <code>##</code>, or <code>###</code>.
-            </div>
-          {:else}
-            <div class="outline-list">
-              {#each outline as h (h.line + ':' + h.text)}
-                <button
-                  class="outline-item"
-                  data-lvl={h.level}
-                  title="Jump to line {h.line}"
-                  onclick={() => editorRef?.revealLines(h.line, h.line)}
-                >
-                  {h.text}
-                </button>
-              {/each}
-            </div>
-          {/if}
-        </aside>
+        <div class="rail">
+          <aside class="outline">
+            <div class="outline-head">Outline</div>
+            {#if outline.length === 0}
+              <div class="outline-empty">
+                No headings yet. Start a line with <code>#</code>, <code>##</code>, or <code>###</code>.
+              </div>
+            {:else}
+              <div class="outline-list">
+                {#each outline as h (h.line + ':' + h.text)}
+                  <button
+                    class="outline-item"
+                    data-lvl={h.level}
+                    title="Jump to line {h.line}"
+                    onclick={() => editorRef?.revealLines(h.line, h.line)}
+                  >
+                    {h.text}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </aside>
+          <FilePane
+            {projectPath}
+            active={sideFile}
+            onopen={openSideFile}
+            ondeleted={(name) => {
+              if (sideFile === name) sideFile = null
+            }}
+          />
+        </div>
       {/if}
       <Editor
         bind:this={editorRef}
@@ -717,6 +738,10 @@
           ? 'Write your manuscript in Quarto markdown. Type @ to cite a paper; run analyses in ```{r} chunks. Select text and right-click to add a note for Claude.'
           : 'Write your slides in Quarto revealjs. Separate slides with ## headings.'}
       />
+
+      {#if sideFile}
+        <SideFile {projectPath} name={sideFile} {papers} onclose={() => (sideFile = null)} />
+      {/if}
 
       {#if notesEnabled && showNotes}
         <aside class="notes">
@@ -970,11 +995,18 @@
     font-size: 13px;
   }
 
-  /* --- Outline side panel (left) --- */
-  .outline {
+  /* --- Left rail: outline on top, project-files pane below --- */
+  .rail {
     flex: none;
     width: 220px;
     margin-right: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+  }
+  .outline {
+    flex: 1;
     display: flex;
     flex-direction: column;
     min-height: 0;
