@@ -153,9 +153,23 @@ export function findDoi(text: string): string | undefined {
   return m[0].replace(/[.,;:)\]]+$/, '')
 }
 
+/**
+ * Crossref needs no API key, but it does ask callers to identify themselves with
+ * a contact address. Doing so puts you in their "polite pool", which gets its
+ * own rate limits and — the part that matters — means they email you before
+ * blocking a misbehaving client instead of just blocking it. Set
+ * `LCTRN_CONTACT_EMAIL` to opt in; without it we still identify the tool, we
+ * just land in the anonymous pool.
+ */
+function crossrefUserAgent(): string {
+  const mailto = process.env.LCTRN_CONTACT_EMAIL?.trim()
+  const contact = mailto ? `; mailto:${mailto}` : ''
+  return `lctrn/0.1 (https://github.com/victor-234/lectern-2${contact})`
+}
+
 async function fromCrossref(doi: string): Promise<Partial<ExtractedMeta> | null> {
   const res = await fetch(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, {
-    headers: { 'User-Agent': 'lctrn/0.1 (https://github.com/; academic reference manager)' },
+    headers: { 'User-Agent': crossrefUserAgent() },
     signal: AbortSignal.timeout(12_000)
   })
   if (!res.ok) return null

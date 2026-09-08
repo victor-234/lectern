@@ -12,7 +12,7 @@ let inquiryWatcher: FSWatcher | null = null
 let docWatcher: FSWatcher | null = null
 
 /**
- * Watch `<root>/.sources/` so PDFs pasted in (or deleted) update the library
+ * Watch `<root>/sources/` so PDFs pasted in (or deleted) update the library
  * automatically, and `<root>/.lctrn/inquiries/` so an inquiry's `result.md`
  * (written by Claude in the embedded terminal) lights up the UI live. On a
  * sources change we reconcile the registry and notify via `library:changed`; on

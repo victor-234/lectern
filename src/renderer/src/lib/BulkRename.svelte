@@ -1,6 +1,6 @@
 <script lang="ts">
   // Bulk "Rename files to house style" dialog — the lectern-2 port of v1's
-  // BulkRenameModal. Lists every .sources/ PDF whose metadata would yield a
+  // BulkRenameModal. Lists every sources/ PDF whose metadata would yield a
   // different filename, lets the user pick which to apply, and renames them one
   // by one (each rename also updates the registry + master bib). Since the
   // library folder is the Dropbox-synced folder, this is the old "Rename

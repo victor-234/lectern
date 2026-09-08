@@ -14,10 +14,9 @@
   let dirty = $state(false)
   let saving = $state(false)
 
+  // Read-only here: shown so the rules panel can say whether rewriting is
+  // available, but edited in ClaudeSetup.svelte.
   let key = $state<ApiKeyState | null>(null)
-  let keyInput = $state('')
-  let keySaving = $state(false)
-  let keyError = $state('')
 
   $effect(() => {
     window.api.library.writingRules.get().then((c) => {
@@ -37,19 +36,6 @@
     }
   }
 
-  async function saveKey(): Promise<void> {
-    keySaving = true
-    keyError = ''
-    try {
-      await window.api.ai.setKey(keyInput)
-      keyInput = ''
-      key = await window.api.ai.keyState()
-    } catch (e) {
-      keyError = e instanceof Error ? e.message : String(e)
-    } finally {
-      keySaving = false
-    }
-  }
 
   // ⌘S saves without closing; Esc closes (prompting only if there's unsaved work).
   function onkeydown(e: KeyboardEvent): void {
@@ -90,48 +76,26 @@
     oninput={() => (dirty = true)}
   ></textarea>
 
+  <!-- The key itself moved to the Claude setup panel, so there is exactly ONE
+       place to answer "where does my Claude go". This is the pointer. -->
   <div class="wr-key">
     <div class="wr-key__row">
       <span class="wr-key__label">Anthropic API key</span>
       {#if key?.fromEnv}
         <span class="wr-key__state">from ANTHROPIC_API_KEY</span>
       {:else if key?.present}
-        <!-- No keychain to bind to when Lectern runs as a localhost server, so
-             the key sits in a 0600 file. Say so rather than implying more. -->
         <span class="wr-key__state" data-ok={key.secure ? 'true' : undefined} data-warn={key.secure ? undefined : 'true'}>
           {key.secure ? 'saved' : 'saved (unencrypted file)'}
         </span>
       {:else if key}
-        <span class="wr-key__state" data-warn="true">not set</span>
+        <span class="wr-key__state">not set</span>
       {/if}
     </div>
-    {#if !key?.fromEnv}
-      <div class="wr-key__row">
-        <input
-          class="wr-key__input"
-          type="password"
-          autocomplete="off"
-          placeholder={key?.present ? 'Replace key…' : 'sk-ant-…'}
-          bind:value={keyInput}
-        />
-        <button class="btn" disabled={!keyInput.trim() || keySaving} onclick={saveKey}>
-          {keySaving ? 'Saving…' : 'Save key'}
-        </button>
-      </div>
-    {/if}
-    {#if key && !key.fromEnv && !key.secure}
-      <p class="wr-key__hint">
-        There's no OS keychain here, so a saved key is stored as plain text
-        readable by your account. Export <code>ANTHROPIC_API_KEY</code> before
-        starting Lectern to avoid storing it at all.
-      </p>
-    {/if}
     <p class="wr-key__hint">
-      Used by in-editor rewriting, which calls the API directly so you get a diff to accept or
-      reject. Stored encrypted in your macOS Keychain; the terminal keeps using your Claude Code
-      login.
+      Rewriting a selection calls the API directly (so you get a diff to accept or
+      reject) and needs a key. Set it under <strong>Claude setup</strong> — the
+      terminal itself doesn't need one, it uses your Claude Code login.
     </p>
-    {#if keyError}<p class="wr-key__err">{keyError}</p>{/if}
   </div>
 
   <div class="wr-foot">
@@ -218,9 +182,6 @@
     align-items: center;
     gap: 8px;
   }
-  .wr-key__row + .wr-key__row {
-    margin-top: 8px;
-  }
   .wr-key__label {
     font-family: var(--font-sans);
     font-size: 12px;
@@ -237,27 +198,11 @@
   .wr-key__state[data-warn='true'] {
     color: var(--warn, var(--text-muted));
   }
-  .wr-key__input {
-    flex: 1;
-    min-width: 0;
-    padding: 5px 8px;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text);
-    background: var(--surface-inset, var(--surface));
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-  }
   .wr-key__hint {
     margin: 8px 0 0;
     font-size: 11px;
     line-height: 1.5;
     color: var(--text-muted);
-  }
-  .wr-key__err {
-    margin: 6px 0 0;
-    font-size: 11px;
-    color: var(--danger, var(--text-muted));
   }
   .wr-foot {
     display: flex;

@@ -83,6 +83,7 @@ import { registerRewrite } from './rewrite'
 import { registerExtraRefs } from './extraRefs'
 import { registerGit } from './git'
 import { registerCheckpoints, ensureCheckpointHooks } from './checkpoints'
+import { registerClaudeCli } from './claudeCli'
 import { startBridge } from './bridge'
 
 export interface CoreDeps {
@@ -426,6 +427,8 @@ export function registerCore(
   registerExtraRefs(ipc)
   registerGit(ipc)
   registerCheckpoints(ipc, getWindow)
+  // Is Claude Code installed and logged in? Asked by the setup panel.
+  registerClaudeCli(ipc)
 
   // The loopback endpoint Claude Code's hooks report turn boundaries to. Best
   // effort: without it edits still happen, they just aren't grouped by prompt.
@@ -436,7 +439,7 @@ export function registerCore(
     })
     .catch(() => {})
 
-  // Start watching .sources/ if a library is already configured.
+  // Start watching sources/ if a library is already configured.
   void getLibraryRoot().then((root) => {
     if (root) void watchLibrarySources(root, getWindow)
   })

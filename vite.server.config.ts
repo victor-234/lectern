@@ -28,11 +28,19 @@ const noElectron = (): Plugin => ({
 export default defineConfig({
   plugins: [noElectron()],
   build: {
-    ssr: 'src/server/cli.ts',
+    ssr: true,
     outDir: 'out/server',
     target: 'node20',
     emptyOutDir: true,
     minify: false,
-    rollupOptions: { output: { format: 'cjs', entryFileNames: 'cli.js' } }
+    rollupOptions: {
+      input: {
+        // `lectern` itself.
+        cli: 'src/server/cli.ts',
+        // Regenerates the committed example library (`npm run example`).
+        'make-example': 'src/server/make-example.ts'
+      },
+      output: { format: 'cjs', entryFileNames: '[name].js', chunkFileNames: '[name].js' }
+    }
   }
 })

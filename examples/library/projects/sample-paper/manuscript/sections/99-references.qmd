@@ -1,8 +1,0 @@
-# References
-
-Citations resolve against the generated `references.bib`, which Lectern
-materializes from the papers attached to this project in the shared library.
-Quarto places the formatted bibliography in the div below.
-
-::: {#refs}
-:::

@@ -7,13 +7,23 @@
     projects,
     libraryRoot,
     open = true,
-    ontoggle
+    ontoggle,
+    onsetup
   }: {
     projects: ProjectSummary[]
     libraryRoot: string | null
     open?: boolean
     ontoggle: () => void
+    /** Open the Claude setup panel — offered when `claude` isn't installed. */
+    onsetup: () => void
   } = $props()
+
+  // Whether Claude Code is actually on the login shell's PATH. Checked once, so
+  // the empty state can explain a missing install instead of letting the user
+  // press "launch claude" and watch a shell print `command not found` before it
+  // exits. null while the check is in flight.
+  let claudeFound = $state<boolean | null>(null)
+  window.api.ai.claude.status().then((s) => (claudeFound = s.found))
 
   // The dock holds any number of concurrent Claude sessions, shown as tabs. Each
   // is scoped either to a project (cwd = project path) or to "No project" (cwd =
@@ -265,11 +275,22 @@
       {#if sessions.length === 0}
         <div class="term-empty">
           <Icon n="terminal" />
-          <p>No Claude session running.</p>
-          <small>
-            <strong>Launch claude</strong> scoped to a project, or with
-            <strong>No project</strong> to just chat about a paper.
-          </small>
+          {#if claudeFound === false}
+            <p>Claude Code isn't installed.</p>
+            <small>
+              The terminal runs the real <code>claude</code> from your shell, so it
+              has to be installed and logged in first.
+            </small>
+            <button class="btn btn--primary term-empty__cta" onclick={onsetup}>
+              Set up Claude
+            </button>
+          {:else}
+            <p>No Claude session running.</p>
+            <small>
+              <strong>Launch claude</strong> scoped to a project, or with
+              <strong>No project</strong> to just chat about a paper.
+            </small>
+          {/if}
         </div>
       {/if}
     </div>

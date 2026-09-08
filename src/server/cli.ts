@@ -8,6 +8,7 @@
 
 import { join, resolve } from 'path'
 import { serve, openInBrowser } from './index'
+import { createDemoLibrary } from '../main/demo'
 
 interface Args {
   port: number
@@ -15,10 +16,19 @@ interface Args {
   library: string | null
   open: boolean
   help: boolean
+  /** Fill the library folder with a worked example before serving it. */
+  demo: boolean
 }
 
 function parse(argv: string[]): Args {
-  const args: Args = { port: 4747, host: '127.0.0.1', library: null, open: true, help: false }
+  const args: Args = {
+    port: 4747,
+    host: '127.0.0.1',
+    library: null,
+    open: true,
+    help: false,
+    demo: false
+  }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const next = (): string => argv[++i] ?? ''
@@ -27,6 +37,7 @@ function parse(argv: string[]): Args {
     else if (a === '--host') args.host = next()
     else if (a === '--library' || a === '-l') args.library = next()
     else if (a === '--no-open') args.open = false
+    else if (a === '--demo') args.demo = true
     // A bare path is the library folder: `cd ~/papers && lectern .` reads the
     // way the equivalent Jupyter or dev-server invocation does.
     else if (!a.startsWith('-')) args.library = a
@@ -40,8 +51,13 @@ const HELP = `
   Usage
     lectern [folder] [options]
 
+  Try it
+    lectern --demo ./lectern-demo
+
   Options
     -l, --library <path>   Library folder to open (default: whatever you used last)
+        --demo             Fill that folder with a worked example first — three
+                           (fictional) papers and a project that cites them
     -p, --port <n>         Port to listen on (default 4747; 0 picks a free one)
         --host <addr>      Address to bind (default 127.0.0.1 — see the warning below)
         --no-open          Don't launch a browser
@@ -63,6 +79,16 @@ async function main(): Promise<void> {
   // out/server/cli.js sits beside out/renderer/, in the source tree and in the
   // published package alike.
   const webRoot = resolve(join(__dirname, '..', 'renderer'))
+
+  // Build the example before the server starts, so the first page load already
+  // shows a populated library rather than the first-run picker.
+  if (args.demo) {
+    const target = resolve(args.library || join(process.cwd(), 'lectern-demo'))
+    const { projectPath } = await createDemoLibrary(target)
+    args.library = target
+    console.log(`\n  Demo library ready at ${target}`)
+    console.log(`  Sample project: ${projectPath}`)
+  }
 
   const { url, port, close } = await serve({
     port: args.port,

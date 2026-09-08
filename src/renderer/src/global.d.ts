@@ -24,6 +24,7 @@ import type { ConfigFile, ConfigFileInfo, ConfigFileSpec } from '../../main/proj
 import type { ManualRef, ManualRefType } from '../../main/extraRefs'
 import type { GitStatus, GitFileChange, GitSyncResult } from '../../main/git'
 import type { ApiKeyState } from '../../main/writingRules'
+import type { ClaudeCliStatus, ClaudeCliTest } from '../../main/claudeCli'
 import type { RewriteRequest, RewriteResult } from '../../main/rewrite'
 import type { ReviewState, Checkpoint, CheckpointFile } from '../../main/checkpoints'
 import type {
@@ -69,6 +70,8 @@ export type {
   GitFileChange,
   GitSyncResult,
   ApiKeyState,
+  ClaudeCliStatus,
+  ClaudeCliTest,
   RewriteRequest,
   RewriteResult,
   ReviewState,

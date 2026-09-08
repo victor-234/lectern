@@ -1,0 +1,53 @@
+---
+title: "Does mandatory carbon disclosure inform investors?"
+author: "Your Name"
+date: today
+bibliography:
+  - ../../.lctrn/references.bib
+  - .lctrn/extra.bib
+format:
+  pdf:
+    number-sections: true
+  html:
+    toc: true
+    number-sections: true
+    embed-resources: true
+execute:
+  echo: false
+  warning: false
+---
+
+## Introduction
+
+This is a demonstration manuscript. It is a normal Quarto document
+(`manuscript.qmd`) that cites the library's shared bibliography, so a citation
+like @ingram2024 resolves against `.lctrn/references.bib` — the one bib
+generated from the whole paper pile, not a per-project copy.
+
+The question this stub sets up: mandatory climate disclosure changes what firms
+publish, but does it change what investors learn? @ingram2024 finds a cost of
+capital effect that appears only where the disclosure is assured, while
+@vasquez2023 shows that a large share of mandated climate risk language is
+recycled boilerplate. Read together they suggest that the binding constraint is
+credibility rather than volume.
+
+## What to try here
+
+1. **Open a paper.** Double-click a row in Papers. The PDF opens in the reader
+   with a notes pane beside it; notes are saved as markdown under `notes/`.
+2. **Cite one.** Type `@` in this editor to pull up citekey completion from the
+   library.
+3. **Render it.** Render to PDF or HTML — this needs Quarto installed.
+4. **Hand it to Claude.** Open the terminal below and ask for something concrete,
+   e.g. *"tighten the introduction and make sure every claim cites a paper in the
+   bibliography"*. Claude Code runs in this folder and edits the same files you
+   are looking at.
+5. **Review what changed.** Every turn is snapshotted, so the review panel shows
+   what Claude touched, grouped by the prompt that caused it, with keep or revert
+   per file.
+
+## Notes
+
+The three papers in this library are fictional, generated to give the demo
+something with a real text layer to search. Replace them with your own PDFs —
+drop them into `sources/` and the watcher will register them.

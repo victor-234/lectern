@@ -11,6 +11,7 @@
   import Reader from './lib/Reader.svelte'
   import TagManager from './lib/TagManager.svelte'
   import WritingRules from './lib/WritingRules.svelte'
+  import ClaudeSetup from './lib/ClaudeSetup.svelte'
   import BulkRename from './lib/BulkRename.svelte'
   import ManualRefs from './lib/ManualRefs.svelte'
   import ReviewPanel from './lib/ReviewPanel.svelte'
@@ -144,6 +145,9 @@
   let collapsedGroups = $state<Set<string>>(new Set())
   let tagManagerOpen = $state(false)
   let writingRulesOpen = $state(false)
+  // Where you point Lectern at your Claude — see ClaudeSetup.svelte. Opened
+  // from the menu, and from the terminal when `claude` isn't installed.
+  let claudeSetupOpen = $state(false)
   let projectPapers = $state<ProjectPapers>({ selected: [], available: [] })
   let adding = $state(false)
 
@@ -914,6 +918,10 @@
                 <Icon n="sparkle" />
                 <span class="proj-name">AI writing rules…</span>
               </button>
+              <button class="proj-row" title="Is Claude Code installed and logged in? Plus the optional API key." onclick={() => { projectMenuOpen = false; claudeSetupOpen = true }}>
+                <Icon n="terminal" />
+                <span class="proj-name">Claude setup…</span>
+              </button>
             </div>
           {/if}
         </div>
@@ -1087,6 +1095,11 @@
           ><Icon n="pdf" /></button>
         {/if}
         <button class="iconbtn" data-on={termOpen} title="Terminal (⌘J)" onclick={() => (termOpen = !termOpen)}><Icon n="terminal" /></button>
+        <!-- Always reachable, unlike the project menu — which only exists in the
+             Workspace, and so is invisible to someone who has just installed
+             Lectern, has no project yet, and is wondering where their Claude
+             goes. -->
+        <button class="iconbtn" title="Claude setup — is Claude Code installed and logged in?" onclick={() => (claudeSetupOpen = true)}><Icon n="sparkle" /></button>
         <button class="iconbtn" title="Theme" onclick={() => (theme = theme === 'dark' ? 'light' : 'dark')}><Icon n={theme === 'dark' ? 'sun' : 'moon'} /></button>
       </div>
     </div>
@@ -1325,6 +1338,7 @@
           {libraryRoot}
           open={termOpen}
           ontoggle={() => (termOpen = !termOpen)}
+          onsetup={() => (claudeSetupOpen = true)}
         />
       </main>
 
@@ -1386,6 +1400,9 @@
     />
   {/if}
 
+  {#if claudeSetupOpen}
+    <ClaudeSetup onclose={() => (claudeSetupOpen = false)} />
+  {/if}
   {#if writingRulesOpen}
     <WritingRules onclose={() => (writingRulesOpen = false)} />
   {/if}

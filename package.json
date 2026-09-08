@@ -11,7 +11,8 @@
     "postinstall": "node scripts/postinstall.js",
     "package": "npm run build && npm run rebuild && electron-builder --mac",
     "build:server": "vite build --config vite.server.config.ts",
-    "serve": "npm run build && npm run build:server && node bin/lectern.js"
+    "serve": "npm run build && npm run build:server && node bin/lectern.js",
+    "example": "npm run build:server && node out/server/make-example.js"
   },
   "devDependencies": {
     "@electron/rebuild": "latest",

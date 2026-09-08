@@ -33,6 +33,7 @@ import type { ReviewState } from '../main/checkpoints'
 import type { ApiKeyState } from '../main/writingRules'
 import type { RewriteRequest, RewriteResult } from '../main/rewrite'
 import type { HostInfo } from '../main/core'
+import type { ClaudeCliStatus, ClaudeCliTest } from '../main/claudeCli'
 
 /** One level of the backend's filesystem, for the browser folder picker. */
 export interface DirListing {
@@ -155,7 +156,14 @@ export function createApi(t: Transport) {
     // itself never crosses back into the renderer — only whether one is set.
     ai: {
       keyState: (): Promise<ApiKeyState> => t.invoke('ai:key:state'),
-      setKey: (key: string): Promise<void> => t.invoke('ai:key:set', key)
+      setKey: (key: string): Promise<void> => t.invoke('ai:key:set', key),
+      // Claude Code itself: the credential Lectern never holds. `status` is
+      // free (does `claude` resolve on the login shell's PATH); `test` spends
+      // one tiny request to prove it's logged in, so it's button-triggered.
+      claude: {
+        status: (): Promise<ClaudeCliStatus> => t.invoke('claude:status'),
+        test: (): Promise<ClaudeCliTest> => t.invoke('claude:test')
+      }
     },
     projects: {
       list: () => t.invoke('projects:list'),

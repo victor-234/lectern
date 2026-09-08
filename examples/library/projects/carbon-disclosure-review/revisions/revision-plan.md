@@ -1,6 +1,6 @@
-# Revision plan — Scaling Attention
+# Revision plan — Does mandatory carbon disclosure inform investors?
 
-Each step is a scoped Claude Code task. Status: `[ ]` todo · `[~]` running · `[x]` done.
+Each step is a scoped Claude Code task. Status: `[ ]` to-do · `[~]` doing · `[x]` done.
 When a step is done, snapshot the manuscript into `revisions/round-NN/`.
 
 - [ ] **1. Structure pass** — lead with the contribution; cut the related-work dump to one paragraph.

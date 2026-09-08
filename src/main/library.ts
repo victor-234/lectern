@@ -217,6 +217,13 @@ export async function setLastProject(path: string | null): Promise<void> {
 export async function setLibraryRoot(root: string): Promise<string> {
   await ensureLibrary(root)
   await writeSettings({ ...(await readSettings()), libraryRoot: root })
+  // The master bib records each PDF's ABSOLUTE path in its `file = {…}` field,
+  // which stops being true the moment the library arrives from somewhere else —
+  // a Dropbox folder opened on a second machine with a different home directory,
+  // or the example library in this repo after someone clones it. Pointing
+  // Lectern at a folder is exactly the moment to make those paths true again,
+  // and regenerating is cheap and idempotent.
+  await regenerateMasterBib(root)
   return root
 }
 
@@ -636,7 +643,7 @@ function isInsideSources(root: string, absPath: string): boolean {
   return !rel.startsWith('..') && !isAbsolute(rel)
 }
 
-/** Pick a non-colliding filename within `.sources/`. */
+/** Pick a non-colliding filename within `sources/`. */
 async function uniqueFilename(dir: string, filename: string): Promise<string> {
   const ext = extname(filename)
   const base = basename(filename, ext)
@@ -653,7 +660,7 @@ async function uniqueFilename(dir: string, filename: string): Promise<string> {
   }
 }
 
-/** Copy a PDF into `.sources/` and return its library-relative path. */
+/** Copy a PDF into `sources/` and return its library-relative path. */
 async function importIntoSources(root: string, src: string): Promise<string> {
   const dir = sourcesDir(root)
   await fs.mkdir(dir, { recursive: true })
@@ -808,6 +815,15 @@ export async function updateLibraryPaper(
     if (patch.tagIds.length) p.tagIds = patch.tagIds
     else delete p.tagIds
   }
+  // Someone who has told us the title, the authors AND the year has identified
+  // the paper, so stop trying to work it out: stamp the entry as enriched.
+  // Without this, `enrichLibrary` still sees an unstamped paper later and runs
+  // the whole extraction ladder over it — up to spawning the `claude` CLI — to
+  // re-derive metadata a human already supplied. Only ever stamps a paper that
+  // has never been enriched, so a real crossref/embedded provenance is kept.
+  if (!p.metaSource && p.title && p.authors?.length && p.year) {
+    p.metaSource = 'imported'
+  }
   if (patch.citekey !== undefined) {
     const base = clean(patch.citekey)?.replace(/^@/, '').replace(/\s+/g, '')
     if (base && base !== p.citekey) p.citekey = uniqueCitekey(reg, p, base)
@@ -881,7 +897,7 @@ export interface RenamePreviewItem {
 }
 
 /**
- * List every `.sources/` paper whose metadata would produce a different
+ * List every `sources/` paper whose metadata would produce a different
  * filename than it currently has — the data behind the bulk-rename dialog.
  * Mirrors `renamePaperToHouseStyle`'s naming exactly (journal map wins), and
  * omits papers already in house style, too sparse to name, or missing on disk.
@@ -913,7 +929,7 @@ export async function previewHouseRenames(root: string): Promise<RenamePreviewIt
  * Rename a paper's PDF on disk to the house style ("Wagner et al. 2024 JFE,
  * Corp governance.pdf"), derived from its metadata. The library folder is the
  * Dropbox-synced folder, so renaming the file here is the v1 "Rename Dropbox"
- * action. Only files lctrn owns inside `.sources/` are touched; externally-pathed
+ * action. Only files lctrn owns inside `sources/` are touched; externally-pathed
  * entries are left alone. The registry path is updated in the same pass, so the
  * folder watcher reconciles to a no-op instead of dropping the entry. Skips
  * (returns renamed:false) when metadata is too sparse or the name is unchanged.
@@ -961,7 +977,7 @@ export async function removeLibraryPaper(root: string, id: string): Promise<void
   reg.papers = reg.papers.filter((p) => p.id !== id)
   await writeRegistry(root, reg)
   await regenerateMasterBib(root)
-  // lctrn owns the copy in .sources/, so delete the file too (never an external path).
+  // lctrn owns the copy in sources/, so delete the file too (never an external path).
   if (paper) {
     const abs = resolvePaperPath(root, paper)
     if (isInsideSources(root, abs)) {
@@ -975,10 +991,10 @@ export async function removeLibraryPaper(root: string, id: string): Promise<void
 }
 
 /**
- * Reconcile the registry with the actual contents of `.sources/`. Called by the
+ * Reconcile the registry with the actual contents of `sources/`. Called by the
  * folder watcher so pasting a PDF in (or deleting one) updates the library:
- *  - new *.pdf files in `.sources/` get registered
- *  - registry entries whose `.sources/` file vanished get dropped
+ *  - new *.pdf files in `sources/` get registered
+ *  - registry entries whose `sources/` file vanished get dropped
  * Returns true when anything changed. Externally-pathed entries are left alone.
  */
 export async function syncLibrary(root: string): Promise<boolean> {
