@@ -75,11 +75,7 @@ async function citingFiles(root: string): Promise<string[]> {
   }
   for (const name of projects) {
     const pp = join(root, 'projects', name)
-    files.push(
-      join(pp, 'manuscript.qmd'),
-      join(pp, 'slides.qmd'),
-      join(pp, 'MANUSCRIPT_NOTES.md')
-    )
+    files.push(join(pp, 'manuscript.qmd'), join(pp, 'MANUSCRIPT_NOTES.md'))
   }
 
   // Per-paper reading notes (notes/<title>.md).

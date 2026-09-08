@@ -60,6 +60,13 @@
     if (active >= results.length) active = Math.max(0, results.length - 1)
   })
 
+  // Keep the highlighted row on screen: the list scrolls (up to 50 hits in a
+  // 64vh panel), so arrowing past its edge has to bring the row into view.
+  let rowEls = $state<HTMLButtonElement[]>([])
+  $effect(() => {
+    rowEls[active]?.scrollIntoView({ block: 'nearest' })
+  })
+
   function choose(p: ResolvedPaper | undefined): void {
     if (!p) return
     onopen(p)
@@ -100,6 +107,7 @@
     <div class="qo-list">
       {#each results as p, i (p.id)}
         <button
+          bind:this={rowEls[i]}
           class="qo-row"
           data-active={i === active}
           onmousemove={() => (active = i)}
@@ -150,7 +158,7 @@
     flex-direction: column;
     background: var(--surface);
     border: 1px solid var(--border-strong, var(--border));
-    border-radius: var(--r-lg, 12px);
+    border-radius: var(--r-md, 12px);
     box-shadow: var(--shadow-pop, 0 16px 48px rgba(0, 0, 0, 0.32));
     overflow: hidden;
   }
@@ -200,7 +208,7 @@
     padding: 8px 10px;
     background: transparent;
     border: none;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     color: var(--text-secondary);
     cursor: pointer;
   }

@@ -17,6 +17,7 @@
     writeLabel = null,
     onwrite,
     onread,
+    onreading,
     onsave,
     onrefetch,
     onrename,
@@ -32,6 +33,8 @@
     onwrite: () => void
     /** Open this paper's PDF in the Reader. */
     onread?: (p: ResolvedPaper) => void
+    /** Put this paper on the sidebar reading list, or take it off. */
+    onreading?: (p: ResolvedPaper, on: boolean) => Promise<void>
     onsave?: (id: string, patch: PaperPatch) => Promise<UpdatePaperResult | void>
     /** Re-run extraction and overwrite this paper's metadata from its PDF. */
     onrefetch?: (p: ResolvedPaper) => Promise<void>
@@ -55,6 +58,7 @@
   const sourceLabel: Record<string, string> = {
     crossref: 'Crossref',
     claude: 'Claude',
+    pages: 'Claude (first pages)',
     embedded: 'PDF metadata',
     filename: 'filename',
     imported: 'Imported'
@@ -100,6 +104,7 @@
     issue: '',
     pages: '',
     doi: '',
+    url: '',
     abstract: '',
     tagIds: [] as string[]
   })
@@ -125,6 +130,7 @@
       issue: paper.issue ?? '',
       pages: paper.pages ?? '',
       doi: paper.doi ?? '',
+      url: paper.url ?? '',
       abstract: paper.abstract ?? '',
       tagIds: [...(paper.tagIds ?? [])]
     }
@@ -168,6 +174,7 @@
         issue: d.issue,
         pages: d.pages,
         doi: d.doi,
+        url: d.url,
         abstract: d.abstract,
         tagIds: [...d.tagIds]
       })
@@ -224,6 +231,7 @@
       if (m.pages) draft.pages = m.pages
       if (m.abstract) draft.abstract = m.abstract
       if (m.doi) draft.doi = m.doi
+      if (m.url) draft.url = m.url
     } catch (err) {
       console.error('Failed to fetch metadata from DOI', err)
       alert('Could not fetch from Crossref: ' + (err instanceof Error ? err.message : String(err)))
@@ -236,7 +244,7 @@
     if (!paper || !onrefetch || refetching) return
     if (
       !confirm(
-        'Re-fetch metadata from the DOI/Crossref and PDF? This overwrites the title, authors, year, journal, volume, issue, pages, DOI, and abstract for this entry.'
+        'Re-fetch metadata from the DOI/Crossref and PDF? This overwrites the title, authors, year, journal, volume, issue, pages, DOI, URL, and abstract for this entry.'
       )
     )
       return
@@ -311,6 +319,14 @@
         <h3 class="insp-title">{paper.title || paper.citekey}</h3>
         {#if onread && paper.exists && !editing}
           <button class="iconbtn" title="Open PDF in Reader" onclick={() => onread(paper)}><Icon n="pdf" /></button>
+        {/if}
+        {#if onreading && !editing}
+          <button
+            class="iconbtn"
+            class:iconbtn--on={!!paper.readingAt}
+            title={paper.readingAt ? 'Remove from reading list' : 'Add to reading list'}
+            onclick={() => onreading(paper, !paper.readingAt)}
+          ><Icon n="bookmark" /></button>
         {/if}
         {#if onrefetch && paper.exists && !editing}
           <button
@@ -398,6 +414,7 @@
                 >{fetching ? 'Fetching…' : 'Fetch'}</button>
               </span>
             </label>
+            <label>URL <small>landing page — the locator for papers with no DOI</small><input bind:value={draft.url} placeholder="https://…" /></label>
             <label>Abstract<textarea rows="6" bind:value={draft.abstract}></textarea></label>
           </div>
         </div>
@@ -430,12 +447,10 @@
       <div class="insp-sec">
         <h5>Metadata {#if pending}<span style="color: var(--text-muted); font-weight: 400; text-transform: none; letter-spacing: 0">· fetching…</span>{/if}</h5>
         <dl class="insp-meta">
-          <dt>Citekey</dt><dd style="color: var(--accent)">@{paper.citekey}</dd>
+          <dt>Journal</dt><dd title={paper.journal}>{paper.journal || '—'}</dd>
           <dt>Year</dt><dd>{paper.year || '—'}</dd>
-          <dt>Journal</dt>
-          <dd title={paper.journal}>
-            {paper.journal || '—'}{#if paper.journalAbbrev}&nbsp;({paper.journalAbbrev}){/if}
-          </dd>
+          <dt>Abbrev</dt><dd>{paper.journalAbbrev || '—'}</dd>
+          <dt>Citekey</dt><dd style="color: var(--accent)">@{paper.citekey}</dd>
           {#if paper.volume || paper.issue || paper.pages}
             <dt>Vol / Iss</dt>
             <dd>
@@ -447,6 +462,12 @@
           <dd>
             {#if paper.doi}
               <a href="https://doi.org/{paper.doi}" target="_blank" rel="noreferrer" style="color: var(--accent)">{paper.doi}</a>
+            {:else}—{/if}
+          </dd>
+          <dt>URL</dt>
+          <dd>
+            {#if paper.url}
+              <a href={paper.url} target="_blank" rel="noreferrer" title={paper.url} style="color: var(--accent)">{paper.url}</a>
             {:else}—{/if}
           </dd>
           <dt>Source</dt><dd>{paper.metaSource ? sourceLabel[paper.metaSource] : 'pending'}</dd>
@@ -561,7 +582,7 @@
     color: var(--text);
     background: var(--surface-inset);
     border: 1px solid var(--border);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     padding: 5px 8px;
     outline: none;
     resize: vertical;
@@ -603,7 +624,12 @@
     color: var(--text-muted);
     background: var(--surface-inset);
     border: 1px solid var(--border);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
+  }
+  /* Bookmark toggle reads "on" while the paper sits on the reading list. */
+  .iconbtn--on {
+    color: var(--accent);
+    border-color: var(--accent-line);
   }
   .iconbtn--danger:hover:not(:disabled) {
     color: var(--danger);

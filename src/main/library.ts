@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { platform } from './platform'
 import { promises as fs } from 'fs'
 import { randomUUID } from 'crypto'
 import { homedir } from 'os'
@@ -9,6 +9,7 @@ import { extractMetadata, type ExtractedMeta } from './metadata'
 import { buildHouseFilename, extensionOf, lastName } from './houseName'
 import { paperInteractedAt } from './paperNotes'
 import { renameCitekeyEverywhere, type CitekeyRewriteResult } from './citekeys'
+import { ensureWritingRules } from './writingRules'
 
 /**
  * All paper PDFs live in this folder inside the library root. Deliberately NOT
@@ -32,10 +33,12 @@ export function sourcesDir(root: string): string {
 
 interface AppSettings {
   libraryRoot?: string
+  /** Last project the user opened, restored as the default on the next launch. */
+  lastProject?: string
 }
 
 function settingsFile(): string {
-  return join(app.getPath('userData'), 'lctrn-settings.json')
+  return join(platform.userDataDir(), 'lctrn-settings.json')
 }
 
 /**
@@ -55,16 +58,16 @@ async function migrateSettingsFile(): Promise<void> {
   } catch {
     /* fall through and look for a legacy file */
   }
-  const appData = app.getPath('appData')
+  const appData = platform.appDataDir()
   const candidates = [
-    join(app.getPath('userData'), 'lectern-settings.json'), // same userData, old filename
+    join(platform.userDataDir(), 'lectern-settings.json'), // same userData, old filename
     join(appData, 'lectern-2', 'lectern-settings.json'), // dev (old package name)
     join(appData, 'Lectern', 'lectern-settings.json') // packaged (old productName)
   ]
   for (const c of candidates) {
     try {
       const data = await fs.readFile(c, 'utf8')
-      await fs.mkdir(app.getPath('userData'), { recursive: true })
+      await fs.mkdir(platform.userDataDir(), { recursive: true })
       await fs.writeFile(settingsFile(), data)
       return
     } catch {
@@ -83,7 +86,7 @@ async function readSettings(): Promise<AppSettings> {
 }
 
 async function writeSettings(s: AppSettings): Promise<void> {
-  await fs.mkdir(app.getPath('userData'), { recursive: true })
+  await fs.mkdir(platform.userDataDir(), { recursive: true })
   await fs.writeFile(settingsFile(), JSON.stringify(s, null, 2) + '\n')
 }
 
@@ -106,10 +109,17 @@ export async function getLibraryRoot(): Promise<string | null> {
   return root
 }
 
-/** Run all first-launch on-disk migrations for a library, in dependency order. */
+/**
+ * Bring a library's on-disk layout up to date, in dependency order. Memoized per
+ * root inside getLibraryRoot(), so it runs once per launch — which is also why
+ * the library-wide files every project expects get seeded here rather than in
+ * ensureLibrary(), which only runs when a library is chosen or a project created.
+ */
 async function migrateLibraryLayout(root: string): Promise<void> {
   await migrateConfigDir(root)
   await migrateSourcesDir(root)
+  // Library-wide AI writing rules, shared by every project (see writingRules.ts).
+  await ensureWritingRules(root)
 }
 
 /**
@@ -139,8 +149,8 @@ async function migrateSourcesDir(root: string): Promise<void> {
 /**
  * Migrate a library from the pre-rename `.lectern/` config dirs to `.lctrn/`.
  * Renames the root config dir and each project's, then rewrites the baked-in
- * `.lectern` paths (the `bibliography:` front matter in every manuscript/slides
- * doc, and `.claude/settings.json`'s `additionalDirectories`). Idempotent: each
+ * `.lectern` paths (the `bibliography:` front matter in every manuscript, and
+ * `.claude/settings.json`'s `additionalDirectories`). Idempotent: each
  * step short-circuits once the target already exists. Must run before anything
  * reads `.lctrn`, so it's awaited inside getLibraryRoot()/ensureLibrary().
  */
@@ -179,7 +189,7 @@ async function renameIfLegacy(oldDir: string, newDir: string): Promise<void> {
 
 /** Rewrite `.lectern` → `.lctrn` in the project files that bake the path in. */
 async function rewriteLegacyConfigPaths(projectPath: string): Promise<void> {
-  const files = ['manuscript.qmd', 'slides.qmd', join('.claude', 'settings.json')]
+  const files = ['manuscript.qmd', join('.claude', 'settings.json')]
   for (const rel of files) {
     const abs = join(projectPath, rel)
     try {
@@ -191,6 +201,17 @@ async function rewriteLegacyConfigPaths(projectPath: string): Promise<void> {
       /* file absent — skip */
     }
   }
+}
+
+export async function getLastProject(): Promise<string | null> {
+  return (await readSettings()).lastProject ?? null
+}
+
+export async function setLastProject(path: string | null): Promise<void> {
+  const s = await readSettings()
+  if (path) s.lastProject = path
+  else delete s.lastProject
+  await writeSettings(s)
 }
 
 export async function setLibraryRoot(root: string): Promise<string> {
@@ -218,12 +239,21 @@ export interface LibraryPaper {
   issue?: string
   /** Page range, e.g. "123-145". */
   pages?: string
+  /** Landing page for the paper (emitted as BibTeX `url`). Carries the locator
+   *  for working papers and anything else that has no DOI. */
+  url?: string
   /** Which extractor filled the metadata; absent means enrichment hasn't run yet. */
   metaSource?: ExtractedMeta['source']
   /** Tags (`.lctrn/tags.json`) this paper is wired into. */
   tagIds?: string[]
   /** Epoch ms when the paper was registered; drives the default "last added" sort. */
   addedAt?: number
+  /**
+   * Epoch ms when the paper was put on the reading list; absent means it isn't
+   * queued. The stamp (rather than a bare flag) keeps the list in the order the
+   * papers were added to it.
+   */
+  readingAt?: number
   path: string // relative to the library root when inside it, else absolute
 }
 
@@ -425,6 +455,34 @@ export async function addTagToPapers(
     const cur = p.tagIds ?? []
     if (cur.includes(tagId)) continue
     p.tagIds = [...cur, tagId]
+    changed = true
+  }
+  if (changed) await writeRegistry(root, reg)
+}
+
+/**
+ * Put papers on the reading list (`on`) or take them off it. Idempotent: adding
+ * a paper that's already queued keeps its original stamp, so re-dropping it
+ * doesn't jump it to the front of the queue.
+ */
+export async function setPapersReading(
+  root: string,
+  paperIds: string[],
+  on: boolean
+): Promise<void> {
+  const ids = new Set(paperIds)
+  const reg = await readRegistry(root)
+  let changed = false
+  const now = Date.now()
+  for (const p of reg.papers) {
+    if (!ids.has(p.id)) continue
+    if (on) {
+      if (p.readingAt) continue
+      p.readingAt = now
+    } else {
+      if (!p.readingAt) continue
+      delete p.readingAt
+    }
     changed = true
   }
   if (changed) await writeRegistry(root, reg)
@@ -706,6 +764,7 @@ export interface PaperPatch {
   volume?: string
   issue?: string
   pages?: string
+  url?: string
   tagIds?: string[]
 }
 
@@ -744,6 +803,7 @@ export async function updateLibraryPaper(
   if (patch.volume !== undefined) p.volume = clean(patch.volume)
   if (patch.issue !== undefined) p.issue = clean(patch.issue)
   if (patch.pages !== undefined) p.pages = clean(patch.pages)
+  if (patch.url !== undefined) p.url = clean(patch.url)
   if (patch.tagIds !== undefined) {
     if (patch.tagIds.length) p.tagIds = patch.tagIds
     else delete p.tagIds
@@ -1053,6 +1113,7 @@ function applyMeta(reg: Registry, p: LibraryPaper, m: ExtractedMeta, overwrite =
   p.volume = keep(m.volume, p.volume)
   p.issue = keep(m.issue, p.issue)
   p.pages = keep(m.pages, p.pages)
+  p.url = keep(m.url, p.url)
   p.metaSource = m.source
   // Promote the filename-slug citekey to author+year when we learned both.
   const surname = surnameOf(p.authors[0])
@@ -1262,6 +1323,7 @@ function bibEntry(p: ResolvedPaper): string {
     p.issue && `  number  = {${p.issue}}`,
     p.pages && `  pages   = {${p.pages}}`,
     p.doi && `  doi     = {${p.doi}}`,
+    p.url && `  url     = {${p.url}}`,
     `  file    = {${p.absPath}}`
   ]
     .filter(Boolean)

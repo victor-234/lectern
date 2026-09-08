@@ -34,7 +34,8 @@
     refresh: 'M21 12a9 9 0 11-2.6-6.4M21 3v4h-4',
     branch: 'M6 3v12M6 21a3 3 0 100-6 3 3 0 000 6zM18 9a3 3 0 100-6 3 3 0 000 6zM18 9a9 9 0 01-9 9',
     rename: 'M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L2 12V2h10l8.6 8.6a2 2 0 010 2.8zM7 7h.01',
-    diff: 'M6 3v6M3 6h6M3 18h6M15 6h6M18 3v6M15 18h6'
+    diff: 'M6 3v6M3 6h6M3 18h6M15 6h6M18 3v6M15 18h6',
+    external: 'M14 4h6v6M20 4l-8 8M18 14v6H4V6h6'
   }
 </script>
 

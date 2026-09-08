@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import type { WindowLike } from './platform'
 import { createServer, type Server } from 'http'
 import { promises as fs } from 'fs'
 import { homedir } from 'os'
@@ -56,7 +56,7 @@ async function readBody(req: import('http').IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString('utf8')
 }
 
-async function handle(payload: HookPayload, getWindow: () => BrowserWindow | null): Promise<void> {
+async function handle(payload: HookPayload, getWindow: () => WindowLike | null): Promise<void> {
   const projectPath = payload.cwd
   if (!projectPath) return
 
@@ -89,7 +89,7 @@ async function handle(payload: HookPayload, getWindow: () => BrowserWindow | nul
  * returns a stop function for app teardown.
  */
 export async function startBridge(
-  getWindow: () => BrowserWindow | null
+  getWindow: () => WindowLike | null
 ): Promise<{ stop: () => void }> {
   const token = randomBytes(24).toString('hex')
 

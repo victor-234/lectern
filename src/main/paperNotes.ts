@@ -1,4 +1,4 @@
-import type { IpcMain } from 'electron'
+import type { IpcLike } from './platform'
 import { promises as fs } from 'fs'
 import { join, resolve, sep } from 'path'
 import { getLibraryRoot, getLibraryPaper, type LibraryPaper } from './library'
@@ -123,7 +123,7 @@ export async function writePaperNote(id: string, content: string): Promise<Paper
   return { content, file, exists: true }
 }
 
-export function registerPaperNotes(ipcMain: IpcMain): void {
+export function registerPaperNotes(ipcMain: IpcLike): void {
   ipcMain.handle('library:note:get', (_e, id: string) => readPaperNote(id))
   ipcMain.handle('library:note:save', (_e, args: { id: string; content: string }) =>
     writePaperNote(args.id, args.content)

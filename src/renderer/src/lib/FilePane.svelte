@@ -1,8 +1,9 @@
 <script lang="ts">
   // Workspace file pane: the project's markdown config files (revision plan,
-  // writing style, LEARNED_EDITS.md, …) listed below the outline. Clicking a
-  // file opens it in a split editor beside the manuscript; clicking the open
-  // one again closes the split. Same files.list backend as the old Config modal.
+  // writing style, LEARNED_EDITS.md, …) listed at the foot of the right rail,
+  // under Notes. Clicking a file opens it in a split editor beside the
+  // manuscript; clicking the open one again closes the split. Same files.list
+  // backend as the old Config modal.
   import Icon from './Icon.svelte'
   import type { ConfigFileInfo } from '../global'
 
@@ -22,6 +23,8 @@
 
   let files = $state<ConfigFileInfo[]>([])
   let newName = $state('')
+  // Collapsed to its header row — the list is secondary to Notes above it.
+  let collapsed = $state(false)
 
   async function refresh(pp: string): Promise<void> {
     const list = await window.api.projects.files.list(pp)
@@ -48,6 +51,7 @@
     const name = sanitize(newName)
     if (!name) return
     newName = ''
+    collapsed = false // creating a file should reveal the list it lands in
     if (!files.some((f) => f.name === name)) {
       // Surface it immediately; it becomes "real" on the split editor's first save.
       files = [
@@ -71,74 +75,122 @@
   }
 </script>
 
-<aside class="files">
-  <div class="files-head">Files</div>
-  <div class="files-list">
-    {#each files as f (f.name)}
-      <div class="files-item" data-on={active === f.name}>
-        <button class="files-open" title={f.name} onclick={() => onopen(f.name)}>
-          <span class="files-dot" data-exists={f.exists}></span>
-          <span class="files-name">{f.name.replace(/^.*\//, '')}</span>
-        </button>
-        <!-- Only real files on disk are deletable: the front-matter entry is
-             virtual (its name is neither .md nor .pdf), and not-yet-created
-             curated files have nothing to delete. -->
-        {#if f.exists && /\.(md|pdf)$/i.test(f.name)}
-          <button class="files-del" title="Delete {f.name}" onclick={() => deleteFile(f)}>×</button>
-        {/if}
-      </div>
-    {/each}
-  </div>
-  <div class="files-new">
-    <input
-      class="files-new-input"
-      placeholder="NEW_FILE.md"
-      bind:value={newName}
-      onkeydown={(e) => {
-        if (e.key === 'Enter') createFile()
-      }}
-    />
-    <button class="iconbtn" title="Create file" disabled={!sanitize(newName)} onclick={createFile}>
-      <Icon n="plus" />
-    </button>
-  </div>
+<aside class="files" class:files--collapsed={collapsed}>
+  <button
+    class="files-head"
+    aria-expanded={!collapsed}
+    title={collapsed ? 'Show project files' : 'Hide project files'}
+    onclick={() => (collapsed = !collapsed)}
+  >
+    <span class="files-chev" data-collapsed={collapsed}><Icon n="chevron-down" /></span>
+    <span>Files</span>
+    <span class="files-count">{files.length}</span>
+  </button>
+  {#if !collapsed}
+    <div class="files-list">
+      {#each files as f (f.name)}
+        <div class="files-item" data-on={active === f.name}>
+          <button class="files-open" title={f.name} onclick={() => onopen(f.name)}>
+            <span class="files-dot" data-exists={f.exists}></span>
+            <span class="files-name">{f.name.replace(/^.*\//, '')}</span>
+          </button>
+          <!-- Only real files on disk are deletable: the front-matter entry is
+               virtual (its name is neither .md nor .pdf), and not-yet-created
+               curated files have nothing to delete. -->
+          {#if f.exists && /\.(md|pdf)$/i.test(f.name)}
+            <button class="files-del" title="Delete {f.name}" onclick={() => deleteFile(f)}>×</button>
+          {/if}
+        </div>
+      {/each}
+    </div>
+    <div class="files-new">
+      <input
+        class="files-new-input"
+        placeholder="NEW_FILE.md"
+        bind:value={newName}
+        onkeydown={(e) => {
+          if (e.key === 'Enter') createFile()
+        }}
+      />
+      <button class="iconbtn" title="Create file" disabled={!sanitize(newName)} onclick={createFile}>
+        <Icon n="plus" />
+      </button>
+    </div>
+  {/if}
 </aside>
 
 <style>
+  /* Sits at the foot of the right rail under Notes, capped so the notes list
+     keeps the bulk of the height; collapsed it shrinks to its header row. */
   .files {
     flex: none;
     max-height: 45%;
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-sm);
+    background: transparent;
+    border: none;
+    border-top: 1px solid var(--border);
     overflow: hidden;
+  }
+  .files--collapsed {
+    flex: none;
+    max-height: none;
   }
   .files-head {
     flex: none;
-    padding: 12px 14px 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    text-align: left;
     font-family: var(--font-mono);
     font-size: 10px;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-muted);
   }
+  .files-head:hover {
+    color: var(--text-secondary);
+  }
+  .files-chev {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-faint);
+    transition: transform var(--dur-fast) ease;
+  }
+  .files-chev[data-collapsed='true'] {
+    transform: rotate(-90deg);
+  }
+  .files-chev :global(svg) {
+    width: 12px;
+    height: 12px;
+  }
+  .files-count {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
   .files-list {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 2px 6px 6px;
+    padding: 0 0 6px;
     display: flex;
     flex-direction: column;
     gap: 0;
   }
   .files-item {
+    flex: none;
     display: flex;
     align-items: center;
-    border-radius: var(--r-sm);
+    border-radius: 0;
     font-family: var(--font-mono);
     font-size: 11px;
     line-height: 1.5;
@@ -151,7 +203,7 @@
   .files-item[data-on='true'] {
     background: var(--accent-weak);
     color: var(--text);
-    box-shadow: inset 0 0 0 1px var(--accent-line, var(--border-strong));
+    box-shadow: inset 2px 0 0 var(--accent);
   }
   .files-open {
     flex: 1;
@@ -162,7 +214,7 @@
     text-align: left;
     background: transparent;
     border: none;
-    padding: 2px 8px;
+    padding: 3px 12px;
     cursor: pointer;
     font: inherit;
     color: inherit;

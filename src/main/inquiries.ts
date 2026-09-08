@@ -32,14 +32,21 @@ function inquiryDir(root: string, slug: string): string {
 /**
  * How an inquiry chooses its papers. `manual` is an explicit list of citation
  * keys; `filter` is a predicate over the registry — free text matched against
- * title/abstract/authors/journal (AND across tokens), narrowed by tags (ANY of
- * the chosen tags) and an optional year range. Resolved to concrete paperIds at
- * create time and frozen into the folder.
+ * title/abstract/authors/journal (AND across tokens), narrowed by author names,
+ * tags (ANY of the chosen tags) and an optional year range. Resolved to concrete
+ * paperIds at create time and frozen into the folder.
  */
 export interface InquirySelection {
   kind: 'manual' | 'filter'
   keys?: string[]
   text?: string
+  /**
+   * Comma-separated author names. Each name is matched against EVERY author of
+   * a paper, not just the first one, so "Vance" finds papers where they are
+   * fourth author; several names AND together ("Abbasi, Vance" = papers both
+   * worked on).
+   */
+  authors?: string
   tagIds?: string[]
   yearFrom?: number
   yearTo?: number
@@ -52,6 +59,8 @@ export interface InquiryMeta {
   selection: InquirySelection
   paperIds: string[]
   created: string
+  /** A saved-but-not-yet-run inquiry: editable in the composer, no terminal. */
+  draft?: boolean
 }
 
 export interface InquirySummary {
@@ -61,6 +70,7 @@ export interface InquirySummary {
   paperCount: number
   created: string
   hasResult: boolean
+  draft: boolean
 }
 
 /** Resolve a selection against the live registry, preserving a sensible order. */
@@ -77,19 +87,39 @@ export async function resolveSelection(
   }
   const tokens = (sel.text ?? '').toLowerCase().split(/\s+/).filter(Boolean)
   const tags = sel.tagIds ?? []
+  // Free text sees the whole author list (every position, not just the first).
   const haystack = (p: ResolvedPaper): string =>
-    [p.title, p.abstract, p.journal, p.journalAbbrev, ...p.authors].filter(Boolean).join(' ').toLowerCase()
+    [p.title, p.citekey, p.abstract, p.journal, p.journalAbbrev, ...p.authors]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+  const wantedAuthors = splitAuthorQuery(sel.authors)
   return all.filter((p) => {
     if (tokens.length) {
       const h = haystack(p)
       if (!tokens.every((t) => h.includes(t))) return false
     }
+    if (wantedAuthors.length && !matchesAuthors(p, wantedAuthors)) return false
     if (tags.length && !tags.some((t) => p.tagIds?.includes(t))) return false
     const yr = p.year ? parseInt(p.year, 10) : NaN
     if (sel.yearFrom && (!yr || yr < sel.yearFrom)) return false
     if (sel.yearTo && (!yr || yr > sel.yearTo)) return false
     return true
   })
+}
+
+/** "Abbasi, Vance" → ['abbasi', 'vance'] (empty for a blank query). */
+export function splitAuthorQuery(q: string | undefined): string[] {
+  return (q ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+/** Every queried name must match SOME author of the paper, at any position. */
+export function matchesAuthors(p: { authors: string[] }, wanted: string[]): boolean {
+  const names = p.authors.map((a) => a.toLowerCase())
+  return wanted.every((w) => names.some((n) => n.includes(w)))
 }
 
 // --- Read --------------------------------------------------------------------
@@ -115,7 +145,8 @@ export async function listInquiries(root: string): Promise<InquirySummary[]> {
         question: meta.question,
         paperCount: meta.paperIds?.length ?? 0,
         created: meta.created,
-        hasResult: await exists(join(inquiryDir(root, slug), 'result.md'))
+        hasResult: await exists(join(inquiryDir(root, slug), 'result.md')),
+        draft: Boolean(meta.draft)
       })
     } catch {
       // not a well-formed inquiry — skip
@@ -160,33 +191,80 @@ export interface CreatedInquiry {
  * a stable record even as the library changes later. Scaffolds the `inquiry`
  * skill and a settings.json granting Claude read access to the bibliography and
  * the PDF store. Returns the folder so the renderer can launch a terminal in it.
+ *
+ * `draft: true` writes exactly the same folder but marks it unrun — the composer
+ * can reopen it later (see `updateInquiry`). A draft is a real folder, not a
+ * side-table: same folder-is-the-record rule as everything else.
  */
 export async function createInquiry(
   root: string,
   title: string,
   question: string,
   selection: InquirySelection,
-  now: string
+  now: string,
+  draft = false
 ): Promise<CreatedInquiry> {
   const papers = await resolveSelection(root, selection)
   const slug = await uniqueSlug(root, slugify(title || question))
   const dir = inquiryDir(root, slug)
-  await fs.mkdir(join(dir, '.claude', 'skills', 'inquiry'), { recursive: true })
 
   const meta: InquiryMeta = {
     slug,
-    title: title.trim() || question.trim().slice(0, 60),
+    title: title.trim() || question.trim().slice(0, 60) || 'Untitled inquiry',
     question: question.trim(),
     selection,
     paperIds: papers.map((p) => p.id),
-    created: now
+    created: now,
+    ...(draft ? { draft: true } : {})
   }
+  await writeInquiryFolder(dir, meta, papers)
+  return { meta, dir, kickoff: kickoffPrompt() }
+}
 
+/**
+ * Rewrite an existing inquiry in place — used to edit a draft and to promote one
+ * to a real run (`draft: false`). The selection is re-resolved against the live
+ * registry, so a draft picks up papers added since it was saved. Keeps the slug
+ * (and therefore the folder, and any result.md already in it).
+ */
+export async function updateInquiry(
+  root: string,
+  slug: string,
+  patch: { title: string; question: string; selection: InquirySelection; draft: boolean }
+): Promise<CreatedInquiry | null> {
+  const dir = inquiryDir(root, slug)
+  let prev: InquiryMeta
+  try {
+    prev = JSON.parse(await fs.readFile(join(dir, 'inquiry.json'), 'utf8'))
+  } catch {
+    return null
+  }
+  const papers = await resolveSelection(root, patch.selection)
+  const meta: InquiryMeta = {
+    ...prev,
+    slug,
+    title: patch.title.trim() || patch.question.trim().slice(0, 60) || prev.title,
+    question: patch.question.trim(),
+    selection: patch.selection,
+    paperIds: papers.map((p) => p.id),
+    ...(patch.draft ? { draft: true } : { draft: undefined })
+  }
+  if (!patch.draft) delete meta.draft
+  await writeInquiryFolder(dir, meta, papers)
+  return { meta, dir, kickoff: kickoffPrompt() }
+}
+
+/** Write (or rewrite) the folder: metadata, manifest and Claude scaffolding. */
+async function writeInquiryFolder(
+  dir: string,
+  meta: InquiryMeta,
+  papers: ResolvedPaper[]
+): Promise<void> {
+  await fs.mkdir(join(dir, '.claude', 'skills', 'inquiry'), { recursive: true })
   await fs.writeFile(join(dir, 'inquiry.json'), JSON.stringify(meta, null, 2) + '\n')
   await fs.writeFile(join(dir, 'selection.md'), selectionMd(meta, papers))
   await fs.writeFile(join(dir, '.claude', 'settings.json'), inquirySettings())
   await fs.writeFile(join(dir, '.claude', 'skills', 'inquiry', 'SKILL.md'), inquirySkill())
-  return { meta, dir, kickoff: kickoffPrompt() }
 }
 
 export async function deleteInquiry(root: string, slug: string): Promise<void> {

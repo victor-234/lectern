@@ -14,6 +14,7 @@
   import { EditorState, StateEffect, StateField } from '@codemirror/state'
   import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
   import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+  import { Math as mdMath, mathTag } from './mdMath'
   import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
   import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
   import {
@@ -31,9 +32,12 @@
     onchange,
     onsave,
     onContextNote,
+    oncursor,
     papers = [],
     cellOutputs = [],
-    placeholder = ''
+    placeholder = '',
+    autofocus = true,
+    ownFind = true
   }: {
     value: string
     onchange: (v: string) => void
@@ -43,14 +47,26 @@
       text: string
       line: number
       endLine: number
+      /** Character offsets, so a Rewrite can replace exactly this span later. */
+      from: number
+      to: number
       x: number
       y: number
     }) => void
+    /** 1-based line the caret sits on, on every move (and after every edit). */
+    oncursor?: (line: number) => void
     /** Attached papers offered as `@`-citation completions. */
     papers?: ResolvedPaper[]
     /** Rendered output of each executable code chunk, shown inline below it. */
     cellOutputs?: CellOutput[]
     placeholder?: string
+    /** Take the caret on mount. Off where the editor is a side panel rather
+     *  than the thing you came to write in (e.g. a paper's notes). */
+    autofocus?: boolean
+    /** Let ⌘F open this editor's own find panel. Off inside the Reader, where
+     *  ⌘F belongs to the paper — otherwise both find bars open at once and the
+     *  editor's steals the caret. */
+    ownFind?: boolean
   } = $props()
 
   // Live handle on the papers list so the completion source sees the latest set
@@ -268,6 +284,24 @@
     return true
   }
 
+  /**
+   * Replace a character range and select the result — how an accepted Rewrite
+   * lands in the draft. Goes through a normal dispatch, so it joins the undo
+   * history and ⌘Z reverts it like any other edit. Returns false if the range
+   * no longer fits the document (the author kept typing while it generated).
+   */
+  export function replaceRange(from: number, to: number, text: string): boolean {
+    if (!view) return false
+    if (from < 0 || to > view.state.doc.length || from > to) return false
+    view.dispatch({
+      changes: { from, to, insert: text },
+      selection: { anchor: from, head: from + text.length },
+      scrollIntoView: true
+    })
+    view.focus()
+    return true
+  }
+
   /** Scroll to (and select) a 1-based line range — used when clicking a note. */
   export function revealLines(line: number, endLine: number): void {
     if (!view) return
@@ -430,6 +464,8 @@
     { tag: t.emphasis, fontStyle: 'italic' },
     { tag: t.strikethrough, textDecoration: 'line-through' },
     { tag: t.monospace, color: 'var(--data-cyan)' },
+    // `$…$` math — parsed as one opaque span so `$Q^{*}$` can't open emphasis.
+    { tag: mathTag, color: 'var(--data-violet)' },
     { tag: t.quote, color: 'var(--text-secondary)', fontStyle: 'italic' },
     { tag: t.link, color: 'var(--info)' },
     { tag: t.url, color: 'var(--info)' },
@@ -449,7 +485,7 @@
         extensions: [
           history(),
           EditorView.lineWrapping,
-          markdown({ base: markdownLanguage }),
+          markdown({ base: markdownLanguage, extensions: [mdMath] }),
           syntaxHighlighting(mdHighlight),
           highlightSelectionMatches(),
           cmPlaceholder(placeholder),
@@ -469,11 +505,16 @@
             ...completionKeymap,
             ...defaultKeymap,
             ...historyKeymap,
-            ...searchKeymap,
+            ...(ownFind ? searchKeymap : searchKeymap.filter((b) => b.key !== 'Mod-f')),
             indentWithTab
           ]),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onchange(u.state.doc.toString())
+            // Caret line — drives the outline's "you are here" marker. Fires on
+            // edits too, since typing shifts which heading the caret sits under.
+            if (u.docChanged || u.selectionSet) {
+              oncursor?.(u.state.doc.lineAt(u.state.selection.main.head).number)
+            }
           }),
           EditorView.domEventHandlers({
             contextmenu: (event, v) => {
@@ -485,6 +526,8 @@
                 text: v.state.sliceDoc(from, to),
                 line: doc.lineAt(from).number,
                 endLine: doc.lineAt(to).number,
+                from,
+                to,
                 x: event.clientX,
                 y: event.clientY
               })
@@ -494,7 +537,8 @@
         ]
       })
     })
-    view.focus()
+    if (autofocus) view.focus()
+    oncursor?.(view.state.doc.lineAt(view.state.selection.main.head).number)
     // Seed the freshly-mounted editor with any outputs already in hand.
     if (outputsRef.list.length) view.dispatch({ effects: setCellOutputs.of(outputsRef.list) })
     const created = view
@@ -526,9 +570,7 @@
     min-height: 0;
     overflow: hidden;
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-sm);
+    border: none;
   }
   .cm-host :global(.cm-editor) {
     height: 100%;

@@ -2,68 +2,23 @@ import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net, Menu }
 import type { MenuItemConstructorOptions } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
-import { registerPty } from './pty'
-import { readProjectInfo, type ProjectMeta } from './scaffold'
-import {
-  addLibraryPapers,
-  addProjectPaper,
-  createProject,
-  defaultLibraryRoot,
-  enrichLibrary,
-  getLibraryRoot,
-  getProjectPapers,
-  listLibraryPapers,
-  listProjects,
-  listTags,
-  listGroups,
-  setTagGroup,
-  createTag,
-  renameTag,
-  reorderTags,
-  addTagToPapers,
-  deleteTag,
-  createGroup,
-  renameGroup,
-  deleteGroup,
-  paperAbsPath,
-  readPaperPdf,
-  updateLibraryPaper,
-  refetchLibraryPaper,
-  suggestCitekey,
-  renamePaperToHouseStyle,
-  previewHouseRenames,
-  type PaperPatch,
-  removeLibraryPaper,
-  removeProjectPaper,
-  setLibraryRoot
-} from './library'
-import { fetchByDoi } from './metadata'
-import {
-  listInquiries,
-  readInquiry,
-  resolveSelection,
-  createInquiry,
-  deleteInquiry,
-  type InquirySelection
-} from './inquiries'
-import { watchLibrarySources, watchProjectDocs } from './watcher'
-import { readDoc, saveDoc, registerQuarto, type DocKind } from './quarto'
-import { registerNotes } from './notes'
-import { registerPaperNotes } from './paperNotes'
-import { registerProjectFiles, projectPdfPath } from './projectFiles'
-import { registerRevising } from './revising'
-import { registerExtraRefs } from './extraRefs'
-import { registerGit } from './git'
-import { registerCheckpoints, ensureCheckpointHooks } from './checkpoints'
-import { startBridge } from './bridge'
+import { installElectronPlatform } from './platform.electron'
+import { registerCore } from './core'
+import { getLibraryRoot, paperAbsPath } from './library'
+import { projectPdfPath } from './projectFiles'
+
+// Bind the host seam before anything can read a path or a stored secret. Every
+// consumer is lazy, so this is early enough — see platform.ts.
+installElectronPlatform()
 
 let mainWindow: BrowserWindow | null = null
 
-// Kills all embedded PTYs; wired to registerPty in app.whenReady. Called when the
-// window closes so buffered shell output can't fire into a destroyed webContents.
+// Kills all embedded PTYs; wired to registerCore in app.whenReady. Called when
+// the window closes so buffered shell output can't fire into a destroyed
+// webContents.
 let killPtys: () => void = () => {}
-// Shuts down the Claude Code hook bridge; wired to startBridge in app.whenReady.
-let stopBridge: () => void = () => {}
+// Shuts down the Claude Code hook bridge; also from registerCore.
+let stopCore: () => void = () => {}
 
 // Custom scheme that streams library PDFs to the in-app reader. Registered as a
 // standard, secure scheme (before app-ready) so Chromium's PDFium viewer treats
@@ -98,7 +53,8 @@ function buildMenu(): void {
   const sendClose = (): void => mainWindow?.webContents.send('menu:close')
   const go = (action: string): void => mainWindow?.webContents.send('menu:shortcut', action)
   // Reader tabs jump on ⌘1–9 (mac) / ⌥1–9 (win/linux) so they don't collide with
-  // the ⌃1–3 app switcher below.
+  // the ⌃1–3 app switcher below. The renderer routes these per app: in the
+  // Workspace 1 and 2 focus the outline / notes rails instead.
   const tabAccel = (n: number): string => (isMac ? `Command+${n}` : `Alt+${n}`)
 
   const template: MenuItemConstructorOptions[] = [
@@ -118,18 +74,28 @@ function buildMenu(): void {
       label: 'Go',
       submenu: [
         { label: 'Papers', accelerator: 'Control+1', click: () => go('app:papers') },
-        { label: 'Workspace', accelerator: 'Control+2', click: () => go('app:workspace') },
-        { label: 'Reader', accelerator: 'Control+3', click: () => go('app:reader') },
+        { label: 'Reader', accelerator: 'Control+2', click: () => go('app:reader') },
+        { label: 'Workspace', accelerator: 'Control+3', click: () => go('app:workspace') },
         { label: 'Next App', accelerator: 'Control+Tab', click: () => go('app:next') },
         { type: 'separator' as const },
         { label: 'Open Paper…', accelerator: 'CmdOrCtrl+O', click: () => go('open') },
+        { label: 'All Papers', accelerator: 'CmdOrCtrl+Shift+K', click: () => go('library') },
         { label: 'Search Library', accelerator: 'CmdOrCtrl+K', click: () => go('search') },
+        // ⌘F has to be an accelerator too: while a PDF is focused the PDFium
+        // plugin eats the keystroke, so a page-level handler never sees it. The
+        // renderer routes it — to a focused CodeMirror editor's own find panel
+        // when there is one, otherwise to the Reader's find bar.
+        { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: () => go('find') },
         { label: 'Toggle Terminal', accelerator: 'CmdOrCtrl+J', click: () => go('terminal') },
+        // Dock the Reader beside whatever you're doing instead of switching to
+        // it. An accelerator for the same reason as ⌘F — the docked PDF has
+        // focus more often than not, and the plugin eats page-level keys.
+        { label: 'Reader Beside', accelerator: 'CmdOrCtrl+Alt+R', click: () => go('dock') },
         { type: 'separator' as const },
         {
-          label: 'Reader Tab',
+          label: 'Reader Tab / Workspace Panel',
           submenu: Array.from({ length: 9 }, (_, i) => ({
-            label: `Tab ${i + 1}`,
+            label: i === 0 ? 'Tab 1 · Outline' : i === 1 ? 'Tab 2 · Notes' : `Tab ${i + 1}`,
             accelerator: tabAccel(i + 1),
             click: () => go(`tab:${i}`)
           }))
@@ -190,6 +156,8 @@ app.whenReady().then(() => {
   //     by id through the registry (never a renderer-supplied path)
   //   lctrn-pdf://project/<projectPath>/<name>        — a PDF inside a project
   //     (e.g. the rendered manuscript), path-contained via projectPdfPath
+  // The localhost server serves the same two shapes over /pdf/… instead; the
+  // renderer picks between them in lib/pdfUrl.ts.
   protocol.handle('lctrn-pdf', async (request) => {
     const url = new URL(request.url)
     if (url.hostname === 'project') {
@@ -207,254 +175,60 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(abs).toString())
   })
 
-  // --- Library root ---
-  ipcMain.handle('library:get', () => getLibraryRoot())
-  ipcMain.handle('library:defaultPath', () => defaultLibraryRoot())
-  ipcMain.handle('library:useDefault', async () => {
-    const root = await setLibraryRoot(defaultLibraryRoot())
-    await watchLibrarySources(root, () => mainWindow)
-    return root
-  })
-  ipcMain.handle('library:choose', async () => {
-    const res = await dialog.showOpenDialog({
-      properties: ['openDirectory', 'createDirectory'],
-      message: 'Choose or create your lctrn library folder'
-    })
-    if (res.canceled || !res.filePaths[0]) return null
-    const root = await setLibraryRoot(res.filePaths[0])
-    await watchLibrarySources(root, () => mainWindow)
-    return root
-  })
-
-  // --- Global papers ---
-  ipcMain.handle('library:papers', async () => {
-    const root = await getLibraryRoot()
-    return root ? listLibraryPapers(root) : []
-  })
-  ipcMain.handle('library:addPapers', async () => {
-    const root = await getLibraryRoot()
-    if (!root) return []
-    const res = await dialog.showOpenDialog({
-      properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'PDF', extensions: ['pdf'] }],
-      message: 'Add PDFs to your library (copied into sources/)'
-    })
-    if (res.canceled || !res.filePaths.length) return []
-    const added = await addLibraryPapers(root, res.filePaths)
-    // Fetch real metadata in the background; refresh the UI as each entry fills in.
-    void enrichLibrary(root, () => mainWindow?.webContents.send('library:changed'))
-    return added
-  })
-  ipcMain.handle('library:tags', async () => {
-    const root = await getLibraryRoot()
-    return root ? listTags(root) : []
-  })
-  ipcMain.handle('library:groups', async () => {
-    const root = await getLibraryRoot()
-    return root ? listGroups(root) : []
-  })
-  ipcMain.handle(
-    'library:setTagGroup',
-    async (_e, args: { tagId: string; groupId: string | null }) => {
-      const root = await getLibraryRoot()
-      if (root) await setTagGroup(root, args.tagId, args.groupId)
+  // Everything else — library, projects, inquiries, terminal, render, review —
+  // is host-agnostic and lives in core.ts, shared with the localhost server.
+  // Only the native file dialogs and the PDF find-in-page are supplied here.
+  const core = registerCore(ipcMain, () => mainWindow, {
+    host: { mode: 'desktop', nativePickers: true, home: app.getPath('home') },
+    async pickDirectory() {
+      const res = await dialog.showOpenDialog({
+        properties: ['openDirectory', 'createDirectory'],
+        message: 'Choose or create your lctrn library folder'
+      })
+      return res.canceled ? null : (res.filePaths[0] ?? null)
+    },
+    async pickPdfs() {
+      const res = await dialog.showOpenDialog({
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+        message: 'Add PDFs to your library (copied into sources/)'
+      })
+      return res.canceled ? [] : res.filePaths
+    },
+    // --- Highlighting a passage inside the PDF -------------------------------
+    // The reader's PDF is Chromium's PDFium plugin: the page can't draw into it
+    // and has no handle on its text. Chromium's own find-in-page, though, DOES
+    // reach inside the plugin — it paints the match and scrolls the viewer to
+    // it. So the renderer hands us the passage it wants lit up and we run a find
+    // for it.
+    //
+    // The search covers the whole window, our own DOM included, and the first
+    // match wins the highlight — which is why the renderer sends a phrase long
+    // enough that only the PDF can contain it (see probeFor in Reader.svelte).
+    // `matches` comes back so the renderer can fall back to a plain page jump
+    // when the PDF's text doesn't line up with ours (scans, odd hyphenation).
+    // A browser has no equivalent, so in server mode this is absent and the
+    // fallback is always what runs.
+    highlight(text) {
+      const wc = mainWindow?.webContents
+      if (!wc) return Promise.resolve(0)
+      return new Promise<number>((resolve) => {
+        const done = setTimeout(() => resolve(0), 4000)
+        wc.once('found-in-page', (_ev, result) => {
+          clearTimeout(done)
+          resolve(result.matches)
+        })
+        wc.findInPage(text)
+      })
+    },
+    clearHighlight() {
+      mainWindow?.webContents.stopFindInPage('clearSelection')
     }
-  )
-  ipcMain.handle('library:createGroup', async (_e, name: string) => {
-    const root = await getLibraryRoot()
-    return root ? createGroup(root, name) : null
   })
-  ipcMain.handle('library:renameGroup', async (_e, args: { groupId: string; name: string }) => {
-    const root = await getLibraryRoot()
-    if (root) await renameGroup(root, args.groupId, args.name)
-  })
-  ipcMain.handle('library:deleteGroup', async (_e, groupId: string) => {
-    const root = await getLibraryRoot()
-    if (root) await deleteGroup(root, groupId)
-  })
-  ipcMain.handle('library:createTag', async (_e, name: string) => {
-    const root = await getLibraryRoot()
-    return root ? createTag(root, name) : null
-  })
-  ipcMain.handle('library:renameTag', async (_e, args: { tagId: string; name: string }) => {
-    const root = await getLibraryRoot()
-    if (root) await renameTag(root, args.tagId, args.name)
-  })
-  ipcMain.handle(
-    'library:reorderTags',
-    async (_e, entries: Array<{ id: string; groupId: string | null }>) => {
-      const root = await getLibraryRoot()
-      if (root) await reorderTags(root, entries)
-    }
-  )
-  ipcMain.handle(
-    'library:addTagToPapers',
-    async (_e, args: { tagId: string; paperIds: string[] }) => {
-      const root = await getLibraryRoot()
-      if (root) await addTagToPapers(root, args.tagId, args.paperIds)
-    }
-  )
-  ipcMain.handle('library:deleteTag', async (_e, tagId: string) => {
-    const root = await getLibraryRoot()
-    if (root) await deleteTag(root, tagId)
-  })
-  // Raw PDF bytes for the in-app reader (renderer wraps them in a blob: URL).
-  ipcMain.handle('library:pdf', async (_e, id: string) => {
-    const root = await getLibraryRoot()
-    return root ? readPaperPdf(root, id) : null
-  })
-  ipcMain.handle('library:updatePaper', async (_e, args: { id: string; patch: PaperPatch }) => {
-    const root = await getLibraryRoot()
-    return root ? updateLibraryPaper(root, args.id, args.patch) : { files: 0, occurrences: 0 }
-  })
-  ipcMain.handle('library:refetchPaper', async (_e, id: string) => {
-    const root = await getLibraryRoot()
-    if (root) await refetchLibraryPaper(root, id)
-  })
-  ipcMain.handle(
-    'library:suggestCitekey',
-    async (_e, args: { id: string; authors: string[]; year?: string }) => {
-      const root = await getLibraryRoot()
-      return root ? suggestCitekey(root, args.id, args.authors, args.year) : ''
-    }
-  )
-  // Direct DOI→Crossref lookup for the Inspector's Fetch button (returns metadata
-  // for the renderer to drop into the edit form; does not mutate the registry).
-  ipcMain.handle('library:fetchDoi', (_e, doi: string) => fetchByDoi(doi))
-  ipcMain.handle('library:renamePaper', async (_e, id: string) => {
-    const root = await getLibraryRoot()
-    return root ? renamePaperToHouseStyle(root, id) : { renamed: false, reason: 'missing' }
-  })
-  ipcMain.handle('library:renamePreview', async () => {
-    const root = await getLibraryRoot()
-    return root ? previewHouseRenames(root) : []
-  })
-  ipcMain.handle('library:removePaper', async (_e, id: string) => {
-    const root = await getLibraryRoot()
-    if (root) await removeLibraryPaper(root, id)
-  })
-
-  // --- Projects ---
-  ipcMain.handle('projects:list', async () => {
-    const root = await getLibraryRoot()
-    if (!root) return []
-    const projects = await listProjects(root)
-    // Backfill checkpoint hooks into every project. This is the install point
-    // that actually runs: the renderer loads the project list on boot and after
-    // any library change, whereas `project:info` has no caller at all. Claude
-    // Code picks up a settings.json change with its own file watcher, so a
-    // session already running in the terminal starts checkpointing without
-    // being restarted. Idempotent and off the critical path.
-    void Promise.all(projects.map((p) => ensureCheckpointHooks(p.path)))
-    return projects
-  })
-  ipcMain.handle('project:create', async (_e, args: { name: string; meta: ProjectMeta }) => {
-    const root = await getLibraryRoot()
-    if (!root) return { ok: false, error: 'No library configured.' }
-    const created = await createProject(root, args.name, args.meta, new Date().toISOString())
-    if (created.projectPath) await ensureCheckpointHooks(created.projectPath)
-    return created
-  })
-  ipcMain.handle('project:info', async (_e, projectPath: string) => {
-    // Opening a project is also where checkpoint hooks get backfilled into
-    // projects scaffolded before checkpoint review existed. Idempotent.
-    void ensureCheckpointHooks(projectPath)
-    return readProjectInfo(projectPath)
-  })
-  ipcMain.handle('project:doc:get', (_e, args: { projectPath: string; which: DocKind }) =>
-    readDoc(args.projectPath, args.which)
-  )
-  ipcMain.handle(
-    'project:doc:save',
-    (_e, args: { projectPath: string; which: DocKind; content: string }) =>
-      saveDoc(args.projectPath, args.which, args.content)
-  )
-  // Watch the open project's .qmd files for external edits (e.g. Claude in the
-  // terminal). Passing null stops watching.
-  ipcMain.handle('project:doc:watch', (_e, projectPath: string | null) =>
-    watchProjectDocs(projectPath, () => mainWindow)
-  )
-
-  // --- Project ↔ library paper references ---
-  ipcMain.handle('project:papers', async (_e, projectPath: string) => {
-    const root = await getLibraryRoot()
-    return root ? getProjectPapers(root, projectPath) : { selected: [], available: [] }
-  })
-  ipcMain.handle('project:addPaper', async (_e, args: { projectPath: string; id: string }) => {
-    const root = await getLibraryRoot()
-    if (root) await addProjectPaper(root, args.projectPath, args.id)
-  })
-  ipcMain.handle('project:removePaper', async (_e, args: { projectPath: string; id: string }) => {
-    const root = await getLibraryRoot()
-    if (root) await removeProjectPaper(root, args.projectPath, args.id)
-  })
-
-  // --- Inquiries ("talk to your literature") ---
-  ipcMain.handle('inquiries:list', async () => {
-    const root = await getLibraryRoot()
-    return root ? listInquiries(root) : []
-  })
-  ipcMain.handle('inquiry:read', async (_e, slug: string) => {
-    const root = await getLibraryRoot()
-    return root ? readInquiry(root, slug) : null
-  })
-  ipcMain.handle('inquiry:resolve', async (_e, selection: InquirySelection) => {
-    const root = await getLibraryRoot()
-    return root ? resolveSelection(root, selection) : []
-  })
-  ipcMain.handle(
-    'inquiry:create',
-    async (_e, args: { title: string; question: string; selection: InquirySelection }) => {
-      const root = await getLibraryRoot()
-      if (!root) return null
-      return createInquiry(root, args.title, args.question, args.selection, new Date().toISOString())
-    }
-  )
-  ipcMain.handle('inquiry:delete', async (_e, slug: string) => {
-    const root = await getLibraryRoot()
-    if (root) await deleteInquiry(root, slug)
-  })
-
-  // --- Embedded Claude Code terminal ---
-  killPtys = registerPty(ipcMain, () => mainWindow).killAll
-
-  // --- Quarto render (manuscript.qmd / slides.qmd) ---
-  registerQuarto(ipcMain, () => mainWindow)
-
-  // --- Manuscript margin notes (MANUSCRIPT_NOTES.md) ---
-  registerNotes(ipcMain)
-
-  // --- Per-paper reading notes (notes/<title>.md, shown beside the PDF reader) ---
-  registerPaperNotes(ipcMain)
-
-  // --- Project config files (REVISION_PLAN.md, WRITING_STYLE.md, …) ---
-  registerProjectFiles(ipcMain)
-
-  // --- Revising mode (track-changes → LEARNED_EDITS.md) ---
-  registerRevising(ipcMain)
-
-  // --- Per-project manual references (.lctrn/extra-refs.json → extra.bib) ---
-  registerExtraRefs(ipcMain)
-
-  // --- Mini source control (status chip + one-click commit/pull/push) ---
-  registerGit(ipcMain)
-
-  // --- Checkpoint review (snapshot per turn, keep/revert per file) ---
-  registerCheckpoints(ipcMain, () => mainWindow)
-  // The loopback endpoint Claude Code's hooks report turn boundaries to. Best
-  // effort: without it edits still happen, they just aren't grouped by prompt.
-  startBridge(() => mainWindow)
-    .then(({ stop }) => {
-      stopBridge = stop
-    })
-    .catch(() => {})
+  killPtys = core.killPtys
+  stopCore = core.stop
 
   createWindow()
-
-  // Start watching .sources/ if a library is already configured.
-  getLibraryRoot().then((root) => {
-    if (root) void watchLibrarySources(root, () => mainWindow)
-  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -467,4 +241,4 @@ app.on('window-all-closed', () => {
 
 // Take the published bridge address down with the app, so a hook firing after
 // quit finds nothing and exits silently instead of reaching a recycled port.
-app.on('will-quit', () => stopBridge())
+app.on('will-quit', () => stopCore())

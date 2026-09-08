@@ -5,8 +5,11 @@ release/
 # Legacy Supabase pull scratch — regenerate locally via scripts/pull-from-supabase.mjs
 data/
 # Personal one-off data-migration scripts (hardcoded local paths, undeclared deps).
-# Kept locally but not published; `git add -f scripts/` to include them.
-scripts/
+# Kept locally but not published; `git add -f scripts/` to include them. Ignore
+# the contents rather than the directory, so the real build scripts below can be
+# re-included — git can't un-ignore a file inside an ignored directory.
+scripts/*
+!scripts/postinstall.js
 # electron-vite occasionally drops a timestamped temp config next to the real one.
 electron.vite.config.*.mjs
 *.log

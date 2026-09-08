@@ -1,4 +1,4 @@
-import type { IpcMain } from 'electron'
+import type { IpcLike } from './platform'
 import { promises as fs } from 'fs'
 import { join, resolve, sep } from 'path'
 import { readDoc } from './quarto'
@@ -16,7 +16,7 @@ import { readDoc } from './quarto'
  *
  * Folder-as-source-of-truth, like the rest of lctrn: snapshots, the diff, and
  * the rules file are all plain files. Scope is the manuscript BODY only — we
- * read it through `readDoc(projectPath, 'manuscript')`, which strips the YAML
+ * read it through `readDoc(projectPath)`, which strips the YAML
  * front matter, so metadata churn never shows up as a "correction".
  */
 
@@ -71,7 +71,7 @@ export async function startRevising(projectPath: string, now: string): Promise<R
   await ensureLearnEdits(projectPath)
   const dir = revisingDir(projectPath)
   await fs.mkdir(dir, { recursive: true })
-  const { content } = await readDoc(projectPath, 'manuscript')
+  const { content } = await readDoc(projectPath)
   await fs.writeFile(join(dir, BASELINE_FILE), content, 'utf8')
   const session: SessionFile = { active: true, startedAt: now, baseline: BASELINE_FILE }
   await fs.writeFile(join(dir, SESSION_FILE), JSON.stringify(session, null, 2) + '\n', 'utf8')
@@ -86,7 +86,7 @@ export async function finishRevising(projectPath: string, now: string): Promise<
   } catch {
     /* no baseline (shouldn't happen) — treat as empty so everything reads as added */
   }
-  const { content: after } = await readDoc(projectPath, 'manuscript')
+  const { content: after } = await readDoc(projectPath)
 
   await clearSession(dir)
 
@@ -258,7 +258,7 @@ Do not modify \`manuscript.qmd\`. Only update \`LEARNED_EDITS.md\`.
 
 // --- IPC ---------------------------------------------------------------------
 
-export function registerRevising(ipcMain: IpcMain): void {
+export function registerRevising(ipcMain: IpcLike): void {
   ipcMain.handle('project:revising:state', (_e, projectPath: string) =>
     getRevisingState(projectPath)
   )

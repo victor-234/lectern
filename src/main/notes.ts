@@ -1,4 +1,4 @@
-import type { IpcMain } from 'electron'
+import type { IpcLike } from './platform'
 import { promises as fs } from 'fs'
 import { join, resolve, sep } from 'path'
 
@@ -298,7 +298,7 @@ export async function addressNotes(projectPath: string): Promise<AddressResult> 
   return { outstanding, kickoff }
 }
 
-export function registerNotes(ipcMain: IpcMain): void {
+export function registerNotes(ipcMain: IpcLike): void {
   ipcMain.handle('project:notes:list', (_e, projectPath: string) => readNotes(projectPath))
   ipcMain.handle('project:notes:address', (_e, projectPath: string) => addressNotes(projectPath))
   ipcMain.handle(

@@ -1,7 +1,7 @@
-import type { IpcMain } from 'electron'
+import type { IpcLike } from './platform'
 import { promises as fs } from 'fs'
 import { dirname, resolve, sep } from 'path'
-import { FILES as QUARTO_FILES, splitFrontMatter, joinFrontMatter } from './quarto'
+import { MANUSCRIPT_FILE, splitFrontMatter, joinFrontMatter } from './quarto'
 
 /**
  * Virtual config entry mapping to the YAML front-matter slice of
@@ -71,7 +71,9 @@ const STARTERS: Record<string, string> = {
   'WRITING_STYLE.md': [
     '# Writing Style',
     '',
-    'How Claude should write in this manuscript.',
+    'How Claude should write in THIS manuscript. Your library-wide rules in',
+    '`../../.lctrn/WRITING_RULES.md` already apply — only put what is specific to',
+    'this paper or its venue here, and it overrides the library rules on conflict.',
     '',
     '## Voice & tone',
     '',
@@ -125,7 +127,7 @@ const FRONTMATTER_STARTER = [
 ].join('\n')
 
 function manuscriptPath(projectPath: string): string {
-  return resolve(projectPath, QUARTO_FILES.manuscript)
+  return resolve(projectPath, MANUSCRIPT_FILE)
 }
 
 async function readFrontMatter(projectPath: string): Promise<ConfigFile> {
@@ -276,7 +278,7 @@ export async function listConfigFiles(projectPath: string): Promise<ConfigFileIn
   return out
 }
 
-export function registerProjectFiles(ipcMain: IpcMain): void {
+export function registerProjectFiles(ipcMain: IpcLike): void {
   ipcMain.handle('project:files:list', (_e, projectPath: string) => listConfigFiles(projectPath))
   ipcMain.handle('project:file:get', (_e, args: { projectPath: string; name: string }) =>
     readProjectFile(args.projectPath, args.name)

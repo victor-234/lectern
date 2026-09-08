@@ -4,16 +4,9 @@
   let title = $state('')
   let authors = $state('')
   let folder = $state('')
-  let model = $state('claude-opus-4-8')
   let busy = $state(false)
   let error = $state<string | null>(null)
   let folderEdited = $state(false)
-
-  const models = [
-    { id: 'claude-opus-4-8', label: 'Opus 4.8 — most capable' },
-    { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6 — balanced' },
-    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 — fast' }
-  ]
 
   function slug(s: string): string {
     return s
@@ -40,8 +33,7 @@
         .split(',')
         .map((a) => a.trim())
         .filter(Boolean),
-      manuscriptFile: 'manuscript.qmd',
-      model
+      manuscriptFile: 'manuscript.qmd'
     }
     const res = await window.api.projects.create({ name: folder.trim(), meta })
     if (res.ok && res.projectPath) {
@@ -72,15 +64,6 @@
       Folder name
       <input bind:value={folder} oninput={() => (folderEdited = true)} placeholder="my-paper" />
     </label>
-    <label>
-      Default model
-      <select bind:value={model}>
-        {#each models as m (m.id)}
-          <option value={m.id}>{m.label}</option>
-        {/each}
-      </select>
-    </label>
-
     {#if error}<p class="err">{error}</p>{/if}
 
     <div class="actions">
@@ -114,7 +97,7 @@
     max-width: 92vw;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-md);
     padding: 24px;
     box-shadow: var(--shadow-pop);
   }
@@ -145,11 +128,10 @@
     letter-spacing: 0;
     opacity: 0.7;
   }
-  input,
-  select {
+  input {
     background: var(--surface-inset);
     border: 1px solid var(--border-strong);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     padding: 8px 10px;
     color: var(--text);
     font-family: var(--font-sans);
@@ -157,8 +139,7 @@
     text-transform: none;
     letter-spacing: 0;
   }
-  input:focus,
-  select:focus {
+  input:focus {
     outline: none;
     border-color: var(--accent);
   }

@@ -3,10 +3,12 @@
   // in the shared editor — same load/autosave/reconcile model as QuartoView:
   // debounced autosave, adopt external edits when clean, slim conflict bar when
   // both sides changed. PDFs (e.g. the rendered manuscript) render read-only in
-  // Chromium's viewer via lctrn-pdf://project/…, reloading on disk changes.
+  // the browser's viewer via the backend's project-PDF route (lib/pdfUrl.ts),
+  // reloading on disk changes.
   import Editor from './Editor.svelte'
   import Icon from './Icon.svelte'
   import type { ResolvedPaper } from '../global'
+  import { projectPdfUrl } from './pdfUrl'
 
   let {
     projectPath,
@@ -24,9 +26,7 @@
   // Cache-buster: bumped when the PDF changes on disk (a fresh render) so the
   // iframe reloads instead of showing Chromium's cached copy.
   let pdfVersion = $state(0)
-  const pdfSrc = $derived(
-    `lctrn-pdf://project/${encodeURIComponent(projectPath)}/${encodeURIComponent(name)}?v=${pdfVersion}`
-  )
+  const pdfSrc = $derived(`${projectPdfUrl(projectPath, name)}?v=${pdfVersion}`)
 
   let initial = $state('') // handed to <Editor>; changes remount it
   let draft = $state('')
@@ -219,11 +219,8 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    margin-left: 12px;
     background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-sm);
+    border-left: 1px solid var(--border);
     overflow: hidden;
   }
   .sf-bar {
@@ -291,7 +288,7 @@
     min-height: 0;
     min-width: 0;
     display: flex;
-    padding: 10px;
+    padding: 0;
   }
   /* PDFs fill the pane edge-to-edge — the viewer brings its own chrome. */
   .sf-body--pdf {

@@ -550,7 +550,7 @@
   .rv-file {
     display: flex;
     align-items: center;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
   }
   .rv-file--on {
     background: var(--accent-weak);
@@ -600,7 +600,7 @@
     font-size: 10px;
     background: none;
     border: 1px solid transparent;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     color: var(--text-faint);
     cursor: pointer;
   }

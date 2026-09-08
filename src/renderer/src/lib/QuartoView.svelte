@@ -1,24 +1,36 @@
 <script lang="ts">
+  import { tick } from 'svelte'
   import Editor from './Editor.svelte'
   import FilePane from './FilePane.svelte'
   import SideFile from './SideFile.svelte'
   import Icon from './Icon.svelte'
   import type { QuartoDoc, ResolvedPaper, ManuscriptNote, CellOutput } from '../global'
 
+  // The document's toolbar lives in the app's single top bar (see App.svelte), not
+  // in a second bar of its own. `toolbar` is the read-only snapshot that bar
+  // renders from; the actions it triggers are the exported functions below.
+  export type WorkspaceToolbar = {
+    loading: boolean
+    rendering: boolean
+    previewOn: boolean
+    revising: boolean
+    openNotes: number
+  }
+
   let {
     projectPath,
-    which,
     papers,
     showOutline = $bindable(true),
     showNotes = $bindable(true),
+    toolbar = $bindable(),
     onLearnEdits,
     onAddressNotes
   }: {
     projectPath: string
-    which: 'manuscript' | 'slides'
     papers: ResolvedPaper[]
     showOutline?: boolean
     showNotes?: boolean
+    toolbar?: WorkspaceToolbar
     onLearnEdits?: (kickoff: string) => void
     onAddressNotes?: (kickoff: string) => void
   } = $props()
@@ -32,10 +44,26 @@
   let saveError = $state<string | null>(null)
 
   let rendering = $state(false)
-  let exportMenu = $state(false) // PDF / HTML dropdown (manuscript)
   let log = $state('')
   let showLog = $state(false)
   let lastExitOk = $state<boolean | null>(null)
+  // Whether a finished render is handed to the OS viewer (Preview, the browser).
+  // Off means the file is still written into the project — you just open it
+  // yourself, from the log head or the file pane. Persisted across sessions.
+  const OPEN_KEY = 'lctrn:render-open'
+  let openAfterRender = $state(localStorage.getItem(OPEN_KEY) !== 'false')
+  let lastOutput = $state<string | null>(null)
+  let openError = $state<string | null>(null)
+  function toggleOpenAfterRender(): void {
+    openAfterRender = !openAfterRender
+    localStorage.setItem(OPEN_KEY, String(openAfterRender))
+  }
+  async function openOutput(): Promise<void> {
+    if (!lastOutput) return
+    openError = null
+    const r = await window.api.projects.openOutput(lastOutput)
+    if (!r.ok) openError = r.error ?? 'Could not open the file.'
+  }
   // Render-log tail-follow: pin the scroll to the bottom as quarto streams output
   // so the latest line is always visible, unless the user scrolls up to read back.
   let logBody = $state<HTMLPreElement | null>(null)
@@ -50,20 +78,18 @@
     if (logStick && logBody) logBody.scrollTop = logBody.scrollHeight
   })
 
-  // --- Inline cell preview (manuscript only) ---
+  // --- Inline cell preview ---
   // Renders the executable code chunks in the background and shows each one's
   // output inline beneath it, so tables/figures are visible while writing.
-  const previewable = $derived(which === 'manuscript')
   let previewOn = $state(false)
   let cellOutputs = $state<CellOutput[]>([])
   let previewing = $state(false)
   let previewError = $state<string | null>(null)
   let lastPreviewSig = $state('') // code-cell signature of the last successful preview
 
-  // --- Revising mode (track-changes → LEARNED_EDITS.md; manuscript only) ---
+  // --- Revising mode (track-changes → LEARNED_EDITS.md) ---
   // ON snapshots the manuscript body as a baseline; OFF diffs against it and
   // hands the corrections to Claude (via onLearnEdits) to update LEARNED_EDITS.md.
-  const revisable = $derived(which === 'manuscript')
   let revising = $state(false)
   let revisingSince = $state<string | null>(null)
   let revisingBusy = $state(false)
@@ -81,7 +107,7 @@
   }
 
   async function toggleRevising(): Promise<void> {
-    if (!revisable || !loadedPath || revisingBusy) return
+    if (!loadedPath || revisingBusy) return
     const pp = loadedPath
     revisingBusy = true
     revisingMsg = null
@@ -149,7 +175,7 @@
   }
 
   async function runPreview(): Promise<void> {
-    if (!previewable || !loadedPath || previewing) return
+    if (!loadedPath || previewing) return
     // Claim the slot synchronously so the save() below — which itself re-triggers
     // runPreview on success — can't kick off a duplicate render.
     previewing = true
@@ -164,7 +190,7 @@
         lastPreviewSig = sig
         return
       }
-      const res = await window.api.projects.previewCells(pp, 'manuscript')
+      const res = await window.api.projects.previewCells(pp)
       if (res.ok) {
         cellOutputs = res.cells
         lastPreviewSig = sig
@@ -191,6 +217,7 @@
 
   let editorRef = $state<{
     revealLines: (line: number, endLine: number) => void
+    replaceRange: (from: number, to: number, text: string) => boolean
   } | null>(null)
 
   // --- Side file (split editor) ---
@@ -203,7 +230,6 @@
   }
 
   // --- Manuscript margin notes (right panel + MANUSCRIPT_NOTES.md) ---
-  const notesEnabled = $derived(which === 'manuscript')
   let notes = $state<ManuscriptNote[]>([])
   // Notes the address-notes skill has applied carry a `✅ DONE` marker; hide them
   // from the panel (they stay in MANUSCRIPT_NOTES.md as a record for Claude).
@@ -214,6 +240,9 @@
     y: number
     line: number
     endLine: number
+    /** Character offsets of the selection, so Rewrite can replace it exactly. */
+    from: number
+    to: number
     snippet: string
   } | null>(null)
   let noteDraft = $state('')
@@ -230,11 +259,22 @@
     text: string
     line: number
     endLine: number
+    from: number
+    to: number
     x: number
     y: number
   }): void {
     noteDraft = ''
-    popover = { x: sel.x, y: sel.y, line: sel.line, endLine: sel.endLine, snippet: sel.text }
+    resetRewrite()
+    popover = {
+      x: sel.x,
+      y: sel.y,
+      line: sel.line,
+      endLine: sel.endLine,
+      from: sel.from,
+      to: sel.to,
+      snippet: sel.text
+    }
     showNotes = true
   }
 
@@ -249,6 +289,78 @@
     })
     popover = null
     noteDraft = ''
+  }
+
+  // --- Rewrite (direct API) ---------------------------------------------------
+  // Rewrite the selection against the writing rules and show the result as a
+  // proposal. Nothing touches the draft until the author accepts, and accepting
+  // goes through a normal editor dispatch so ⌘Z undoes it.
+
+  let rewriteBusy = $state(false)
+  let rewriteText = $state<string | null>(null)
+  let rewriteSection = $state<string | null>(null)
+  let rewriteError = $state('')
+
+  function resetRewrite(): void {
+    rewriteBusy = false
+    rewriteText = null
+    rewriteSection = null
+    rewriteError = ''
+  }
+
+  /**
+   * The heading chain the given line sits under, outermost first — this is how
+   * "the rules of the section" get resolved. Walks the parsed outline backwards
+   * from the selection, keeping each heading that encloses it (a level-2 that
+   * precedes it, then the level-1 above that, …).
+   */
+  function sectionFor(line: number): string[] {
+    const before = outline.filter((h) => h.line <= line)
+    const chain: { level: number; text: string }[] = []
+    for (let i = before.length - 1; i >= 0; i--) {
+      const h = before[i]
+      if (!chain.length || h.level < chain[chain.length - 1].level) {
+        chain.push({ level: h.level, text: h.text })
+        if (h.level === 1) break
+      }
+    }
+    return chain.reverse().map((h) => h.text)
+  }
+
+  async function runRewrite(): Promise<void> {
+    if (!popover || !loadedPath || rewriteBusy) return
+    rewriteBusy = true
+    rewriteError = ''
+    try {
+      const res = await window.api.projects.rewrite({
+        projectPath: loadedPath,
+        selection: popover.snippet,
+        section: sectionFor(popover.line),
+        // The note box doubles as an optional steer ("make it shorter").
+        instruction: noteDraft.trim() || undefined
+      })
+      rewriteText = res.text
+      rewriteSection = res.section
+    } catch (e) {
+      // Electron wraps handler errors as "Error invoking remote method 'x':
+      // Error: <real message>" — show only the part we wrote.
+      const raw = e instanceof Error ? e.message : String(e)
+      rewriteError = raw.replace(/^Error invoking remote method '[^']*':\s*Error:\s*/, '')
+    } finally {
+      rewriteBusy = false
+    }
+  }
+
+  function acceptRewrite(): void {
+    if (!popover || !rewriteText) return
+    const ok = editorRef?.replaceRange(popover.from, popover.to, rewriteText)
+    if (!ok) {
+      rewriteError = 'The document changed while this was generating — rewrite again.'
+      return
+    }
+    popover = null
+    noteDraft = ''
+    resetRewrite()
   }
 
   async function deleteNote(id: string): Promise<void> {
@@ -360,11 +472,46 @@
 
   const outline = $derived(parseOutline(draft))
 
+  // Where the caret is, and therefore which outline row is the current section:
+  // the last heading at or above the caret line.
+  let cursorLine = $state(1)
+  const activeHeading = $derived.by(() => {
+    let idx = -1
+    for (let i = 0; i < outline.length; i++) {
+      if (outline[i].line <= cursorLine) idx = i
+      else break
+    }
+    return idx
+  })
+
+  // Long outlines scroll, so keep the lit row in view as the caret walks the doc
+  // ('nearest' → no scrolling at all while it's already visible).
+  let outlineListEl = $state<HTMLDivElement | undefined>(undefined)
+  $effect(() => {
+    void activeHeading
+    outlineListEl?.querySelector('.outline-item--active')?.scrollIntoView({ block: 'nearest' })
+  })
+
+  // The enclosing headings of the active one (a ### under a ## under a #), so the
+  // rail shows the whole path you're in rather than a single lit row.
+  const activeAncestors = $derived.by(() => {
+    const set = new Set<number>()
+    if (activeHeading < 0) return set
+    let level = outline[activeHeading].level
+    for (let i = activeHeading - 1; i >= 0 && level > 1; i--) {
+      if (outline[i].level < level) {
+        set.add(i)
+        level = outline[i].level
+      }
+    }
+    return set
+  })
+
   let saveTimer: ReturnType<typeof setTimeout> | null = null
 
   const dirty = $derived(draft !== lastSaved)
   const words = $derived(countWords(draft))
-  const label = $derived(which === 'manuscript' ? 'Manuscript' : 'Slides')
+  const label = 'Manuscript'
 
   function countWords(s: string): number {
     const text = s
@@ -375,17 +522,15 @@
     return text ? text.split(/\s+/).length : 0
   }
 
-  // The document currently loaded into the editor. Tracked separately from the
-  // `which`/`projectPath` props so that, when the user switches tab mid-edit, we
-  // flush the pending save to the OUTGOING doc (not the one we're switching to).
-  let loadedWhich = $state<'manuscript' | 'slides' | null>(null)
+  // The project currently loaded into the editor. Tracked separately from the
+  // `projectPath` prop so that, when the user switches project mid-edit, we
+  // flush the pending save to the OUTGOING project (not the one we're switching to).
   let loadedPath = $state<string | null>(null)
 
-  // Reload whenever the project or document selection changes.
+  // Reload whenever the project changes.
   $effect(() => {
     const pp = projectPath
-    const w = which
-    void switchTo(pp, w)
+    void switchTo(pp)
   })
 
   // --- Live reload of external edits (Claude in the terminal, etc.) ---
@@ -403,8 +548,8 @@
   })
 
   $effect(() => {
-    return window.api.projects.doc.onChanged((w) => {
-      if (w === loadedWhich) void reconcile()
+    return window.api.projects.doc.onChanged(() => {
+      void reconcile()
     })
   })
 
@@ -412,14 +557,14 @@
   // Reloading the notes never touches the editor body, so do it unconditionally.
   $effect(() => {
     return window.api.projects.notes.onChanged(() => {
-      if (notesEnabled && loadedPath) void loadNotes(loadedPath)
+      if (loadedPath) void loadNotes(loadedPath)
     })
   })
 
   async function reconcile(): Promise<void> {
-    if (!loadedPath || !loadedWhich) return
+    if (!loadedPath) return
     const pp = loadedPath
-    const d = await window.api.projects.doc.get(pp, loadedWhich)
+    const d = await window.api.projects.doc.get(pp)
     if (pp !== loadedPath) return // switched docs while reading
     if (d.content === lastSaved) {
       diskPending = null // our own write, or no real change
@@ -437,10 +582,8 @@
     draft = content
     lastSaved = content
     diskPending = null
-    if (which === 'manuscript') {
-      void loadNotes(loadedPath!)
-      if (previewOn) void runPreview()
-    }
+    void loadNotes(loadedPath!)
+    if (previewOn) void runPreview()
     reloadedFlash = true
     setTimeout(() => (reloadedFlash = false), 1800)
   }
@@ -450,7 +593,7 @@
     void save() // re-assert the editor's version onto disk
   }
 
-  async function switchTo(pp: string, w: 'manuscript' | 'slides'): Promise<void> {
+  async function switchTo(pp: string): Promise<void> {
     // Yield first so the state reads below are outside the effect's tracking
     // scope — otherwise typing (which mutates `draft`) would retrigger this.
     await Promise.resolve()
@@ -459,21 +602,20 @@
       saveTimer = null
     }
     // Persist any unsaved edit to the doc that's currently loaded.
-    if (loadedWhich && loadedPath && draft !== lastSaved) {
+    if (loadedPath && draft !== lastSaved) {
       try {
-        await window.api.projects.doc.save(loadedPath, loadedWhich, draft)
+        await window.api.projects.doc.save(loadedPath, draft)
       } catch (e) {
         // Surface it: the outgoing document's edits did NOT make it to disk.
         saveError = (e as Error)?.message || 'Could not save the previous document.'
       }
     }
     loading = true
-    const d = await window.api.projects.doc.get(pp, w)
+    const d = await window.api.projects.doc.get(pp)
     doc = d
     initial = d.content
     draft = d.content
     lastSaved = d.content
-    loadedWhich = w
     loadedPath = pp
     loading = false
     popover = null
@@ -484,15 +626,9 @@
     lastPreviewSig = ''
     previewError = null
     revisingMsg = null
-    if (w === 'manuscript') {
-      void loadNotes(pp)
-      void loadRevising(pp)
-      if (previewOn) void runPreview()
-    } else {
-      notes = []
-      revising = false
-      revisingSince = null
-    }
+    void loadNotes(pp)
+    void loadRevising(pp)
+    if (previewOn) void runPreview()
   }
 
   // Stream render output for the lifetime of the view.
@@ -503,6 +639,7 @@
     const offExit = window.api.projects.onRenderExit((r) => {
       rendering = false
       lastExitOk = r.ok
+      if (r.ok && r.outputPath) lastOutput = r.outputPath
     })
     return () => {
       offData()
@@ -521,18 +658,17 @@
       clearTimeout(saveTimer)
       saveTimer = null
     }
-    if (saving || draft === lastSaved || !loadedWhich || !loadedPath) return
+    if (saving || draft === lastSaved || !loadedPath) return
     saving = true
-    const w = loadedWhich
     const pp = loadedPath
     const snapshot = draft
     try {
-      await window.api.projects.doc.save(pp, w, snapshot)
+      await window.api.projects.doc.save(pp, snapshot)
       lastSaved = snapshot
       saveError = null
       // Auto-refresh the inline preview once the edit lands (no-op if the code
       // chunks are unchanged, so prose-only edits don't re-render).
-      if (previewOn && previewable) void runPreview()
+      if (previewOn) void runPreview()
     } catch (e) {
       // Leave lastSaved untouched so the doc stays "dirty" and the next
       // keystroke (or a retry click) attempts the save again.
@@ -542,17 +678,17 @@
     }
   }
 
-  async function render(format: 'pdf' | 'html' | 'revealjs'): Promise<void> {
-    exportMenu = false
+  async function render(format: 'pdf' | 'html'): Promise<void> {
     if (rendering) return
     await save() // render the latest bytes
     log = ''
     showLog = true
     logStick = true // follow the fresh output from the bottom
     lastExitOk = null
+    openError = null
     rendering = true
     try {
-      const res = await window.api.projects.render(projectPath, which, format)
+      const res = await window.api.projects.render(projectPath, format, openAfterRender)
       if (!res.ok && res.error) log += `\n${res.error}\n`
     } catch (e) {
       log += `\n${(e as Error).message}\n`
@@ -560,119 +696,82 @@
     }
   }
 
-  // Exposed to App.svelte (via bind:this) so global keyboard shortcuts can drive
-  // the workspace: ⌘R renders the current doc to PDF, ⌘L toggles the render log.
-  export function renderPdf(): void {
+  // Exposed to App.svelte (via bind:this) so the top bar and the global keyboard
+  // shortcuts can drive the workspace. ⌘L toggles the render log.
+  //
+  // ⌘R renders the manuscript to PDF. Starting a render pops the log open;
+  // pressing ⌘R again while it's still running doesn't queue a second render, so
+  // it toggles that log back out of the way instead.
+  export function renderShortcut(): void {
+    if (rendering) {
+      showLog = !showLog
+      return
+    }
     void render('pdf')
   }
   export function toggleLog(): void {
     showLog = !showLog
   }
+  // ⌘P — show the rendered manuscript.pdf. The PDF render copies it back to the
+  // project root, so open it straight from disk instead of re-rendering; if it
+  // isn't there yet, say so in the log bar rather than silently doing nothing.
+  export async function openPdf(): Promise<void> {
+    openError = null
+    const path = `${projectPath}/manuscript.pdf`
+    const r = await window.api.projects.openOutput(path)
+    if (r.ok) {
+      lastOutput = path
+      return
+    }
+    openError = 'No manuscript.pdf yet — press ⌘R to render it.'
+    showLog = true
+  }
+  export function exportAs(format: 'pdf' | 'html'): void {
+    void render(format)
+  }
+  export function togglePreviewPane(): void {
+    void togglePreview()
+  }
+  export function toggleRevisingMode(): void {
+    void toggleRevising()
+  }
+
+  // ⌘1 / ⌘2 — put the keyboard in the outline or the notes rail (revealing it
+  // first if it's hidden). Focus lands on something actionable where there is
+  // one — the current heading, the first note — so ↵ works straight away;
+  // otherwise on the rail itself, which scrolls with the arrow keys.
+  let outlineEl = $state<HTMLElement | null>(null)
+  let rrailEl = $state<HTMLElement | null>(null)
+  export async function focusPanel(side: 'left' | 'right'): Promise<void> {
+    if (side === 'left') showOutline = true
+    else showNotes = true
+    await tick()
+    const rail = side === 'left' ? outlineEl : rrailEl
+    if (!rail) return
+    const target =
+      (rail.querySelector(
+        side === 'left' ? '.outline-item--active' : '.note-jump'
+      ) as HTMLElement | null) ?? rail
+    target.focus()
+    if (target !== rail) target.scrollIntoView({ block: 'nearest' })
+  }
 
   const saveState = $derived(saving ? 'saving…' : dirty ? 'unsaved' : 'saved')
+
+  // Publish the toolbar snapshot upward. Plain values only — the top bar just
+  // renders from it and calls back through the exports above.
+  $effect(() => {
+    toolbar = {
+      loading,
+      rendering,
+      previewOn,
+      revising,
+      openNotes: openNotes.length
+    }
+  })
 </script>
 
 <div class="qv">
-  <div class="qv-bar">
-    <span class="qv-title">{label}</span>
-    <code class="qv-file">{doc?.file ?? ''}</code>
-    <span class="qv-spacer"></span>
-
-    <!-- Outline panel toggle -->
-    <button
-      class="btn btn--ghost"
-      class:btn--active={showOutline}
-      onclick={() => (showOutline = !showOutline)}
-      disabled={loading}
-    >
-      <Icon n="list" />Outline
-    </button>
-
-    <!-- Notes panel toggle -->
-    {#if notesEnabled}
-      <button
-        class="btn btn--ghost"
-        class:btn--active={showNotes}
-        onclick={() => (showNotes = !showNotes)}
-        disabled={loading}
-      >
-        <Icon n="note" />Notes{openNotes.length ? ` (${openNotes.length})` : ''}
-      </button>
-    {/if}
-
-    <!-- Inline cell preview toggle (manuscript only) -->
-    {#if previewable}
-      <button
-        class="btn btn--ghost"
-        class:btn--active={previewOn}
-        onclick={togglePreview}
-        disabled={loading}
-        title="Render code chunks and show tables/figures inline while you write"
-      >
-        <Icon n="table" />Preview{previewing ? '…' : ''}
-      </button>
-    {/if}
-
-    <!-- Revising toggle (track-changes → LEARNED_EDITS.md; manuscript only) -->
-    {#if revisable}
-      <button
-        class="btn btn--ghost"
-        class:btn--active={revising}
-        onclick={toggleRevising}
-        disabled={loading || revisingBusy}
-        title="Track your manual corrections so Claude learns your style. Toggle on, edit, toggle off — Claude distils durable rules into LEARNED_EDITS.md."
-      >
-        <Icon n="pen" />Revising{revisingBusy ? '…' : ''}
-      </button>
-    {/if}
-
-    <!-- Render -->
-    {#if which === 'manuscript'}
-      <div class="qv-export">
-        <button
-          class="btn btn--secondary"
-          class:btn--active={exportMenu}
-          onclick={() => (exportMenu = !exportMenu)}
-          disabled={rendering}
-          aria-haspopup="menu"
-          aria-expanded={exportMenu}
-        >
-          <Icon n="pdf" />Export
-        </button>
-        {#if exportMenu}
-          <button
-            class="qv-export-backdrop"
-            aria-label="Close export menu"
-            onclick={() => (exportMenu = false)}
-          ></button>
-          <div class="qv-export-menu" role="menu">
-            <button class="qv-export-item" role="menuitem" onclick={() => render('pdf')}>
-              <Icon n="pdf" />PDF
-            </button>
-            <button class="qv-export-item" role="menuitem" onclick={() => render('html')}>
-              <Icon n="file" />HTML
-            </button>
-          </div>
-        {/if}
-      </div>
-    {:else}
-      <button class="btn btn--secondary" onclick={() => render('revealjs')} disabled={rendering}>
-        <Icon n="cards" />Render slides
-      </button>
-    {/if}
-
-    {#if rendering}
-      <span class="qv-state">rendering…</span>
-    {:else if saveError}
-      <button class="qv-state qv-state--err" title={saveError} onclick={() => void save()}>
-        ⚠ save failed — retry
-      </button>
-    {:else if reloadedFlash}
-      <span class="qv-state qv-state--ok">↻ updated</span>
-    {:else}
-      <span class="qv-state">{saveState}</span>
-    {/if}
-  </div>
 
   {#if diskPending !== null}
     <div class="qv-conflict">
@@ -695,17 +794,19 @@
     {:else}
       {#if showOutline}
         <div class="rail">
-          <aside class="outline">
+          <aside class="outline" bind:this={outlineEl} tabindex="-1">
             <div class="outline-head">Outline</div>
             {#if outline.length === 0}
               <div class="outline-empty">
                 No headings yet. Start a line with <code>#</code>, <code>##</code>, or <code>###</code>.
               </div>
             {:else}
-              <div class="outline-list">
-                {#each outline as h (h.line + ':' + h.text)}
+              <div class="outline-list" bind:this={outlineListEl}>
+                {#each outline as h, i (h.line + ':' + h.text)}
                   <button
                     class="outline-item"
+                    class:outline-item--active={i === activeHeading}
+                    class:outline-item--ancestor={activeAncestors.has(i)}
                     data-lvl={h.level}
                     title="Jump to line {h.line}"
                     onclick={() => editorRef?.revealLines(h.line, h.line)}
@@ -716,14 +817,6 @@
               </div>
             {/if}
           </aside>
-          <FilePane
-            {projectPath}
-            active={sideFile}
-            onopen={openSideFile}
-            ondeleted={(name) => {
-              if (sideFile === name) sideFile = null
-            }}
-          />
         </div>
       {/if}
       <Editor
@@ -733,18 +826,19 @@
         onsave={save}
         {papers}
         cellOutputs={previewOn ? cellOutputs : []}
-        onContextNote={notesEnabled ? onContextNote : undefined}
-        placeholder={which === 'manuscript'
-          ? 'Write your manuscript in Quarto markdown. Type @ to cite a paper; run analyses in ```{r} chunks. Select text and right-click to add a note for Claude.'
-          : 'Write your slides in Quarto revealjs. Separate slides with ## headings.'}
+        {onContextNote}
+        oncursor={(line) => (cursorLine = line)}
+        placeholder={'Write your manuscript in Quarto markdown. Type @ to cite a paper; run analyses in ```{r} chunks. Select text and right-click to add a note for Claude.'}
       />
 
       {#if sideFile}
         <SideFile {projectPath} name={sideFile} {papers} onclose={() => (sideFile = null)} />
       {/if}
 
-      {#if notesEnabled && showNotes}
-        <aside class="notes">
+      <!-- Right rail: Notes with the project files listed underneath. -->
+      {#if showNotes}
+        <aside class="rrail" bind:this={rrailEl} tabindex="-1">
+        <section class="notes">
           <div class="notes-head">
             <Icon n="note" />
             <span>Notes</span>
@@ -760,7 +854,7 @@
               </button>
             {/if}
             <span class="qv-spacer"></span>
-            <button class="notes-x" title="Hide notes" onclick={() => (showNotes = false)}>×</button>
+            <button class="notes-x" title="Hide panel (⇧⌘B)" onclick={() => (showNotes = false)}>×</button>
           </div>
           {#if openNotes.length > 0}
             <div class="notes-action">
@@ -831,6 +925,15 @@
               {/if}
             </div>
           {/if}
+        </section>
+          <FilePane
+            {projectPath}
+            active={sideFile}
+            onopen={openSideFile}
+            ondeleted={(name) => {
+              if (sideFile === name) sideFile = null
+            }}
+          />
         </aside>
       {/if}
     {/if}
@@ -849,38 +952,102 @@
         class="note-pop-input"
         autofocus
         bind:value={noteDraft}
-        placeholder="Note for Claude about this selection…"
+        placeholder="Note for Claude about this selection — or how to rewrite it…"
         onkeydown={(e) => {
           if (e.key === 'Escape') popover = null
           else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void saveNote()
         }}
       ></textarea>
+
+      {#if rewriteText}
+        <div class="rw-out">
+          <div class="rw-out__head">
+            <Icon n="sparkle" />
+            <span>Rewritten{rewriteSection ? ` · ${rewriteSection}` : ''}</span>
+          </div>
+          <div class="rw-out__body">{rewriteText}</div>
+        </div>
+      {/if}
+      {#if rewriteError}
+        <p class="rw-err">{rewriteError}</p>
+      {/if}
+
       <div class="note-pop-foot">
-        <span class="note-pop-hint">⌘↵ to save</span>
+        <span class="note-pop-hint">{rewriteText ? 'Replaces the selection' : '⌘↵ to save'}</span>
         <span class="qv-spacer"></span>
-        <button class="btn btn--ghost" onclick={() => (popover = null)}>Cancel</button>
-        <button class="btn btn--secondary" disabled={!noteDraft.trim()} onclick={saveNote}>Add note</button>
+        {#if rewriteText}
+          <button class="btn btn--ghost" disabled={rewriteBusy} onclick={runRewrite}>Again</button>
+          <button class="btn btn--ghost" onclick={resetRewrite}>Discard</button>
+          <button class="btn btn--primary" onclick={acceptRewrite}>Accept</button>
+        {:else}
+          <button class="btn btn--ghost" onclick={() => (popover = null)}>Cancel</button>
+          <button
+            class="btn btn--secondary"
+            disabled={rewriteBusy}
+            title="Rewrite this selection with AI, following your writing rules for this section"
+            onclick={runRewrite}
+          >
+            <Icon n="sparkle" />{rewriteBusy ? 'Rewriting…' : 'Rewrite'}
+          </button>
+          <button class="btn btn--secondary" disabled={!noteDraft.trim()} onclick={saveNote}>Add note</button>
+        {/if}
       </div>
     </div>
   {/if}
 
   <div class="qv-log" data-open={showLog}>
-    <button class="qv-log-head" onclick={() => (showLog = !showLog)}>
-      <Icon n="terminal" />
-      <span>Render log</span>
-      {#if lastExitOk === true}<span class="ok">✓ done</span>{/if}
-      {#if lastExitOk === false}<span class="fail">✗ failed</span>{/if}
-      {#if rendering}<span class="run">running…</span>{/if}
-      <span class="qv-spacer"></span>
-      <span class="chev" data-open={showLog}><Icon n="chevron-down" /></span>
-    </button>
+    <div class="qv-log-bar">
+      <button class="qv-log-head" title="Render log (⌘L)" onclick={() => (showLog = !showLog)}>
+        <Icon n="terminal" />
+        <span>Render log</span>
+        {#if lastExitOk === true}<span class="ok">✓ done</span>{/if}
+        {#if lastExitOk === false}<span class="fail">✗ failed</span>{/if}
+        {#if rendering}<span class="run">running…</span>{/if}
+        {#if openError}<span class="fail" title={openError}>✗ could not open</span>{/if}
+        <span class="qv-spacer"></span>
+      </button>
+      <!-- Auto-open, and a manual escape hatch for when it's off. -->
+      {#if lastOutput && !openAfterRender}
+        <button class="qv-log-act" onclick={() => void openOutput()} title="Open the last rendered file in your viewer">
+          <Icon n="external" />Open
+        </button>
+      {/if}
+      <button
+        class="qv-log-act"
+        data-on={openAfterRender}
+        aria-pressed={openAfterRender}
+        onclick={toggleOpenAfterRender}
+        title={openAfterRender
+          ? 'Rendered files open in your viewer — click to keep them in the project only'
+          : 'Rendered files stay in the project — click to open them in your viewer'}
+      >
+        <Icon n="external" />Open after render
+      </button>
+      <button class="qv-log-chev" aria-label="Toggle render log" onclick={() => (showLog = !showLog)}>
+        <span class="chev" data-open={showLog}><Icon n="chevron-down" /></span>
+      </button>
+    </div>
     {#if showLog}
       <pre class="qv-log-body" bind:this={logBody} onscroll={onLogScroll}>{log || 'No output yet. Click a Render button to produce a document.'}</pre>
     {/if}
   </div>
 
+  <!-- Status line. The save/render state used to sit in a second toolbar; it
+       belongs down here with the other passive readouts. -->
   <div class="qv-foot">
-    {words} words · {which === 'manuscript' ? 'PDF / HTML' : 'revealjs'} via Quarto
+    <code class="qv-foot-file">{doc?.file ?? ''}</code>
+    · {words} words
+    {#if rendering}
+      · <span class="run">rendering…</span>
+    {:else if saveError}
+      · <button class="qv-foot-err" title={saveError} onclick={() => void save()}>
+        ⚠ save failed — retry
+      </button>
+    {:else if reloadedFlash}
+      · <span class="qv-foot-ok">↻ updated</span>
+    {:else}
+      · {saveState}
+    {/if}
     {#if previewOn}
       {#if previewing}
         · <span class="run">rendering cells…</span>
@@ -910,64 +1077,27 @@
        overflows `.center` to the right (clipping the outline + editor) — most
        visible when resizing the terminal forces a re-measure. */
     min-width: 0;
-    padding: 14px 18px 0;
   }
-  .qv-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
-    /* Lift the toolbar above the editor body so the Export dropdown (which drops
-       down into the editor region) isn't painted behind CodeMirror's layers. */
-    position: relative;
-    z-index: 5;
-  }
-  .qv-title {
-    font-family: var(--font-sans);
-    font-weight: 600;
-    font-size: 14px;
-    color: var(--text);
-  }
-  .qv-file {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    color: var(--text-faint);
-  }
+
+
+
   .qv-spacer {
     flex: 1;
   }
-  .qv-state {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--text-faint);
-    min-width: 56px;
-    text-align: right;
-  }
-  .qv-state--err {
-    color: var(--danger);
-    background: transparent;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .qv-state--err:hover {
-    text-decoration: underline;
-  }
-  .qv-state--ok {
-    color: var(--success);
-  }
+
+
+
+
 
   /* External-edit conflict banner */
   .qv-conflict {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 12px;
     padding: 8px 12px;
     background: var(--accent-weak);
-    border: 1px solid var(--accent-line, var(--border-strong));
-    border-radius: var(--r-md);
+    border-bottom: 1px solid var(--accent-line, var(--border-strong));
     font-family: var(--font-sans);
     font-size: 12px;
     color: var(--text);
@@ -999,26 +1129,37 @@
   .rail {
     flex: none;
     width: 220px;
-    margin-right: 12px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 0;
     min-height: 0;
+    background: var(--bg-sunken);
+    border-right: 1px solid var(--border);
   }
   .outline {
     flex: 1;
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-sm);
+    background: transparent;
+    border: none;
     overflow: hidden;
+  }
+  /* ⌘1/⌘2 can land on the rail itself (empty outline, no notes) — say where the
+     keyboard went instead of moving focus invisibly. */
+  .outline:focus-visible,
+  .rrail:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+  .outline-item:focus-visible,
+  .note-jump:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
   }
   .outline-head {
     flex: none;
-    padding: 12px 14px 8px;
+    padding: 9px 12px 7px;
     font-family: var(--font-mono);
     font-size: 10px;
     letter-spacing: 0.06em;
@@ -1026,7 +1167,7 @@
     color: var(--text-muted);
   }
   .outline-empty {
-    padding: 4px 14px 14px;
+    padding: 4px 12px 14px;
     font-size: 11.5px;
     line-height: 1.6;
     color: var(--text-muted);
@@ -1040,17 +1181,21 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 4px 6px 8px;
+    padding: 0 0 8px;
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 0;
   }
   .outline-item {
+    /* The list is a flex column that can now be squeezed (the terminal takes its
+       height out of this pane), so rows must not shrink — otherwise they collapse
+       and their text paints outside the row box instead of scrolling. */
+    flex: none;
     text-align: left;
     background: transparent;
     border: none;
-    border-radius: var(--r-sm);
-    padding: 4px 8px;
+    border-radius: 0;
+    padding: 4px 12px;
     cursor: pointer;
     font-family: var(--font-sans);
     font-size: 12.5px;
@@ -1069,33 +1214,51 @@
     color: var(--text);
   }
   .outline-item[data-lvl='2'] {
-    padding-left: 18px;
+    padding-left: 24px;
   }
   .outline-item[data-lvl='3'] {
-    padding-left: 30px;
+    padding-left: 36px;
     font-size: 12px;
     color: var(--text-muted);
   }
+  /* "You are here": the heading the caret sits under, plus its enclosing
+     headings so the whole path reads at a glance. After the data-lvl rules so
+     it wins over the per-level muting. */
+  .outline-item--ancestor {
+    color: var(--text);
+    box-shadow: inset 2px 0 0 var(--accent-line);
+  }
+  .outline-item--active {
+    color: var(--text);
+    background: var(--accent-weak);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
 
-  /* --- Notes side panel --- */
-  .notes {
+  /* --- Right rail: Notes above, project files below --- */
+  .rrail {
     flex: none;
     width: 280px;
-    margin-left: 12px;
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-sm);
+    background: var(--bg-sunken);
+    border-left: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .notes {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     overflow: hidden;
   }
   .notes-head {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 10px 12px;
+    height: 38px;
+    padding: 0 12px;
     border-bottom: 1px solid var(--border);
     font-family: var(--font-sans);
     font-weight: 600;
@@ -1111,7 +1274,7 @@
     font-size: 10px;
     color: var(--text-on-accent, #fff);
     background: var(--accent);
-    border-radius: 999px;
+    border-radius: var(--r-xs);
     padding: 1px 6px;
   }
   .notes-done {
@@ -1120,7 +1283,7 @@
     color: var(--text-muted);
     background: transparent;
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: var(--r-xs);
     padding: 1px 6px;
     cursor: pointer;
   }
@@ -1148,7 +1311,7 @@
     background: var(--accent);
     color: var(--text-on-accent, #fff);
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-xs);
     cursor: pointer;
     font-family: var(--font-sans);
     font-weight: 600;
@@ -1193,22 +1356,22 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 8px;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 0;
   }
+  /* Notes read as a list of rows separated by hairlines, not stacked cards. */
   .note {
+    flex: none;
     position: relative;
-    padding: 8px 10px;
-    background: var(--surface-inset, var(--bg-sunken));
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border-subtle);
   }
   .note--done {
     opacity: 0.6;
-    background: transparent;
-    border-style: dashed;
   }
   .note-done-tag {
     margin-left: 6px;
@@ -1222,7 +1385,7 @@
     color: var(--accent);
     background: var(--accent-weak);
     border: none;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     padding: 1px 6px;
     cursor: pointer;
   }
@@ -1266,7 +1429,7 @@
     white-space: pre-wrap;
     word-break: break-word;
     cursor: text;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
   }
   .note-text:hover {
     background: var(--accent-weak);
@@ -1279,7 +1442,7 @@
     margin-top: 2px;
     background: var(--surface);
     border: 1px solid var(--accent);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     padding: 6px 8px;
     font-family: var(--font-sans);
     font-size: 12px;
@@ -1293,56 +1456,12 @@
     margin-top: 4px;
   }
 
-  /* --- Export (PDF / HTML) dropdown --- */
-  .qv-export {
-    position: relative;
-    display: inline-flex;
-  }
-  .qv-export-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 40;
-    background: transparent;
-    border: none;
-    cursor: default;
-  }
-  .qv-export-menu {
-    position: absolute;
-    z-index: 41;
-    top: calc(100% + 4px);
-    right: 0;
-    min-width: 120px;
-    display: flex;
-    flex-direction: column;
-    padding: 4px;
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--r-md);
-    box-shadow: var(--shadow-lg, var(--shadow-sm));
-  }
-  .qv-export-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    padding: 6px 8px;
-    background: transparent;
-    border: none;
-    border-radius: var(--r-sm);
-    font-family: var(--font-sans);
-    font-size: 12.5px;
-    color: var(--text);
-    text-align: left;
-    cursor: pointer;
-  }
-  .qv-export-item:hover {
-    background: var(--accent-weak, var(--bg-sunken));
-  }
-  .qv-export-item :global(svg) {
-    width: 14px;
-    height: 14px;
-    flex: none;
-  }
+
+
+
+
+
+
 
   /* --- Add-note popover --- */
   .note-backdrop {
@@ -1356,12 +1475,14 @@
   .note-pop {
     position: fixed;
     z-index: 41;
-    width: 320px;
+    /* Wide enough for the Rewrite footer (Again · Discard · Accept) to sit on
+       one row alongside the hint. */
+    width: 420px;
     max-width: calc(100vw - 24px);
     transform: translate(-50%, 8px);
     background: var(--surface);
     border: 1px solid var(--border-strong);
-    border-radius: var(--r-md);
+    border-radius: var(--r-sm);
     box-shadow: var(--shadow-lg, var(--shadow-sm));
     padding: 10px;
   }
@@ -1393,7 +1514,7 @@
     resize: vertical;
     background: var(--surface-inset, var(--bg-sunken));
     border: 1px solid var(--border);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     padding: 8px;
     font-family: var(--font-sans);
     font-size: 12.5px;
@@ -1403,6 +1524,43 @@
   .note-pop-input:focus {
     outline: none;
     border-color: var(--accent);
+  }
+  /* Rewrite proposal, shown inside the note popover until accepted/discarded. */
+  .rw-out {
+    margin: 8px 12px 0;
+    border: 1px solid var(--accent-line, var(--border-strong));
+    border-radius: var(--r-xs);
+    background: var(--accent-weak);
+    overflow: hidden;
+  }
+  .rw-out__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .rw-out__head :global(svg) {
+    width: 12px;
+    height: 12px;
+  }
+  .rw-out__body {
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 0 10px 10px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre-wrap;
+  }
+  .rw-err {
+    margin: 8px 12px 0;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--danger, var(--text-muted));
   }
   .note-pop-foot {
     display: flex;
@@ -1414,10 +1572,7 @@
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-faint);
-  }
-  .btn--active {
-    color: var(--accent);
-    background: var(--accent-weak);
+    white-space: nowrap;
   }
 
   /* render log — the header stays in flow above the footer, but when open the
@@ -1426,18 +1581,24 @@
   .qv-log {
     flex: none;
     border-top: 1px solid var(--border);
-    margin-top: 12px;
+    background: var(--bg-sunken);
     position: relative;
     z-index: 10;
+  }
+  .qv-log-bar {
+    display: flex;
+    align-items: center;
+    padding-right: 8px;
   }
   .qv-log-head {
     display: flex;
     align-items: center;
     gap: 8px;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     background: transparent;
     border: none;
-    padding: 8px 2px;
+    padding: 7px 12px;
     cursor: pointer;
     font-family: var(--font-mono);
     font-size: 10px;
@@ -1462,12 +1623,51 @@
     color: var(--accent);
     text-transform: none;
   }
+  /* Toggle + manual open, sitting to the right of the log header. */
+  .qv-log-act {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: none;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-xs);
+    padding: 3px 7px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+  .qv-log-act :global(svg) {
+    width: 12px;
+    height: 12px;
+    flex: none;
+  }
+  .qv-log-act:hover {
+    color: var(--text-secondary);
+    border-color: var(--border);
+  }
+  .qv-log-act[data-on='true'] {
+    color: var(--accent);
+  }
+  .qv-log-chev {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    background: transparent;
+    border: none;
+    padding: 7px 4px 7px 6px;
+    cursor: pointer;
+    color: var(--text-muted);
+  }
   .chev {
     display: inline-flex;
     align-items: center;
     transition: transform var(--dur-fast);
   }
-  .chev svg {
+  .chev :global(svg) {
     width: 14px;
     height: 14px;
   }
@@ -1480,15 +1680,13 @@
     position: absolute;
     left: 0;
     right: 0;
-    bottom: calc(100% + 4px);
+    bottom: 100%;
     height: min(38vh, 420px);
     overflow: auto;
     margin: 0;
     padding: 10px 12px;
     background: var(--surface-inset);
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.28);
+    border-top: 1px solid var(--border);
     font-family: var(--font-mono);
     font-size: 11.5px;
     line-height: 1.5;
@@ -1498,7 +1696,9 @@
   }
   .qv-foot {
     flex: none;
-    padding: 8px 2px 10px;
+    padding: 7px 12px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-sunken);
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-faint);

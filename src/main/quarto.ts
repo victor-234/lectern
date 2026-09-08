@@ -1,4 +1,4 @@
-import { shell, type IpcMain, type BrowserWindow } from 'electron'
+import { platform, type IpcLike, type WindowLike } from './platform'
 import { spawn, type ChildProcess } from 'child_process'
 import { promises as fs } from 'fs'
 import { basename, dirname, join, resolve, sep } from 'path'
@@ -7,27 +7,22 @@ import { createHash } from 'crypto'
 import { ensureExtraBib } from './extraRefs'
 
 /**
- * A project's real work happens in two Quarto documents at the project root:
- * `manuscript.qmd` (→ PDF/HTML) and `slides.qmd` (→ revealjs). You write prose,
- * cite library papers with `@citekey` against the generated `references.bib`,
- * run analyses in code chunks, and `quarto render` to produce real documents.
- * The folder is the source of truth — Claude editing these files shows up here.
+ * A project's real work happens in one Quarto document at the project root:
+ * `manuscript.qmd` (→ PDF/HTML). You write prose, cite library papers with
+ * `@citekey` against the generated `references.bib`, run analyses in code
+ * chunks, and `quarto render` to produce a real document. The folder is the
+ * source of truth — Claude editing this file shows up here.
  */
 
-export type DocKind = 'manuscript' | 'slides'
-export type RenderFormat = 'pdf' | 'html' | 'revealjs'
+export type RenderFormat = 'pdf' | 'html'
 
 export interface QuartoDoc {
-  which: DocKind
   file: string // project-relative filename
   content: string
   exists: boolean
 }
 
-export const FILES: Record<DocKind, string> = {
-  manuscript: 'manuscript.qmd',
-  slides: 'slides.qmd'
-}
+export const MANUSCRIPT_FILE = 'manuscript.qmd'
 
 // --- Front matter split -------------------------------------------------------
 
@@ -52,9 +47,9 @@ export function joinFrontMatter(frontMatter: string, body: string): string {
 
 // --- Read / save -------------------------------------------------------------
 
-export async function readDoc(projectPath: string, which: DocKind): Promise<QuartoDoc> {
+export async function readDoc(projectPath: string): Promise<QuartoDoc> {
   await ensureQuartoDocs(projectPath)
-  const file = FILES[which]
+  const file = MANUSCRIPT_FILE
   let raw = ''
   let exists = true
   try {
@@ -63,54 +58,47 @@ export async function readDoc(projectPath: string, which: DocKind): Promise<Quar
     exists = false
   }
   // The manuscript editor only sees the body; its YAML lives in the Config modal.
-  const content =
-    which === 'manuscript' ? splitFrontMatter(raw).body.replace(/^\n+/, '') : raw
-  return { which, file, content, exists }
+  return { file, content: splitFrontMatter(raw).body.replace(/^\n+/, ''), exists }
 }
 
 /**
- * Overwrite a project's manuscript/slides .qmd. Path-guarded so a bad `which`
- * can never escape the project folder or touch a non-.qmd file (mirrors the
- * guard `manuscript.ts:saveSection` used). For the manuscript, `content` is the
- * body alone — the on-disk YAML front matter is re-read and preserved, so the
- * body editor and the Config front-matter editor never clobber each other.
+ * Overwrite a project's `manuscript.qmd`. Path-guarded so the write can never
+ * escape the project folder or touch a non-.qmd file (mirrors the guard
+ * `manuscript.ts:saveSection` used). `content` is the body alone — the on-disk
+ * YAML front matter is re-read and preserved, so the body editor and the Config
+ * front-matter editor never clobber each other.
  */
-export async function saveDoc(projectPath: string, which: DocKind, content: string): Promise<QuartoDoc> {
-  const file = FILES[which]
+export async function saveDoc(projectPath: string, content: string): Promise<QuartoDoc> {
+  const file = MANUSCRIPT_FILE
   const abs = resolve(projectPath, file)
   const root = resolve(projectPath)
   if (!abs.startsWith(root + sep) || !abs.toLowerCase().endsWith('.qmd')) {
     throw new Error(`refusing to write outside the project: ${file}`)
   }
-  let toWrite = content
-  if (which === 'manuscript') {
-    let existing = ''
-    try {
-      existing = await fs.readFile(abs, 'utf8')
-    } catch {
-      /* new file — no front matter to preserve */
-    }
-    toWrite = joinFrontMatter(splitFrontMatter(existing).frontMatter, content)
+  let existing = ''
+  try {
+    existing = await fs.readFile(abs, 'utf8')
+  } catch {
+    /* new file — no front matter to preserve */
   }
-  await fs.writeFile(abs, toWrite, 'utf8')
-  return { which, file, content, exists: true }
+  await fs.writeFile(abs, joinFrontMatter(splitFrontMatter(existing).frontMatter, content), 'utf8')
+  return { file, content, exists: true }
 }
 
 // --- Scaffold / migrate ------------------------------------------------------
 
 /**
- * Ensure `manuscript.qmd` + `slides.qmd` exist for a project. Non-destructive:
+ * Ensure `manuscript.qmd` exists for a project. Non-destructive:
  *  - manuscript missing → build it from any legacy `manuscript/sections/*.md`
  *    (concatenated in order) or a starter template, with YAML front matter.
  *  - manuscript present but front-matter-less → prepend front matter, keep body
  *    (covers hand-made qmd files that start with a heading).
- *  - slides missing → write the revealjs starter.
  * Old `manuscript/sections/` is left on disk, just no longer surfaced.
  */
 export async function ensureQuartoDocs(projectPath: string): Promise<void> {
   const { title, authors } = await readConfig(projectPath)
 
-  const mPath = join(projectPath, FILES.manuscript)
+  const mPath = join(projectPath, MANUSCRIPT_FILE)
   let mContent: string | null = null
   try {
     mContent = await fs.readFile(mPath, 'utf8')
@@ -119,24 +107,9 @@ export async function ensureQuartoDocs(projectPath: string): Promise<void> {
   }
   if (mContent == null) {
     const body = (await legacyBody(projectPath)) ?? defaultManuscriptBody()
-    await fs.writeFile(mPath, frontMatter('manuscript', title, authors) + '\n' + body + '\n', 'utf8')
+    await fs.writeFile(mPath, frontMatter(title, authors) + '\n' + body + '\n', 'utf8')
   } else if (!mContent.trimStart().startsWith('---')) {
-    await fs.writeFile(
-      mPath,
-      frontMatter('manuscript', title, authors) + '\n' + mContent.trimStart(),
-      'utf8'
-    )
-  }
-
-  const sPath = join(projectPath, FILES.slides)
-  try {
-    await fs.access(sPath)
-  } catch {
-    await fs.writeFile(
-      sPath,
-      frontMatter('slides', title, authors) + '\n' + defaultSlidesBody() + '\n',
-      'utf8'
-    )
+    await fs.writeFile(mPath, frontMatter(title, authors) + '\n' + mContent.trimStart(), 'utf8')
   }
 
   // Materialize the project's manual-references bib and wire it into the front
@@ -220,26 +193,8 @@ function orderOf(name: string): number {
   return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER
 }
 
-function frontMatter(which: DocKind, title: string, authors: string[]): string {
+function frontMatter(title: string, authors: string[]): string {
   const authorLine = authors.length ? `author: "${yamlEsc(authors.join(', '))}"\n` : ''
-  if (which === 'slides') {
-    return [
-      '---',
-      `title: "${yamlEsc(title)}"`,
-      authorLine.trimEnd(),
-      'bibliography:',
-      '  - ../../.lctrn/references.bib',
-      '  - .lctrn/extra.bib',
-      'format:',
-      '  revealjs:',
-      '    theme: default',
-      '    incremental: true',
-      '    slide-number: true',
-      '---'
-    ]
-      .filter((l) => l !== '')
-      .join('\n') + '\n'
-  }
   return [
     '---',
     `title: "${yamlEsc(title)}"`,
@@ -291,25 +246,6 @@ function defaultManuscriptBody(): string {
     '# Discussion',
     '',
     '# References',
-    '',
-    '::: {#refs}',
-    ':::'
-  ].join('\n')
-}
-
-function defaultSlidesBody(): string {
-  return [
-    '## Overview',
-    '',
-    '- Motivation',
-    '- Approach',
-    '- Findings',
-    '',
-    '## Methods',
-    '',
-    '## Results',
-    '',
-    '## References',
     '',
     '::: {#refs}',
     ':::'
@@ -638,8 +574,8 @@ const PREVIEW_SUFFIX = '.lctrn-preview'
  * slices out the per-chunk output, then cleans up the temp artifacts. One
  * preview at a time.
  */
-async function previewCells(projectPath: string, which: DocKind): Promise<CellPreviewResult> {
-  const srcFile = FILES[which]
+async function previewCells(projectPath: string): Promise<CellPreviewResult> {
+  const srcFile = MANUSCRIPT_FILE
   let raw = ''
   try {
     raw = await fs.readFile(join(projectPath, srcFile), 'utf8')
@@ -702,36 +638,51 @@ async function previewCells(projectPath: string, which: DocKind): Promise<CellPr
  * (`$SHELL -lc 'quarto render …'`) so PATH resolves `quarto`/TinyTeX even when
  * the packaged app is launched from Finder — the same reason `pty.ts` uses a
  * login shell. Streams combined stdout/stderr to the renderer over
- * `project:render:data`, opens the artifact in the OS on success, and emits
- * `project:render:exit`. One render at a time.
+ * `project:render:data`, opens the artifact in the OS on success (unless the
+ * caller passes `open: false`), and emits `project:render:exit`. One render at a
+ * time.
  */
-export function registerQuarto(ipcMain: IpcMain, getWindow: () => BrowserWindow | null): void {
+export function registerQuarto(ipcMain: IpcLike, getWindow: () => WindowLike | null): void {
   let current: ChildProcess | null = null
 
   // Inline cell preview — one at a time, independent of the main render above.
   let previewing = false
   ipcMain.handle(
     'project:preview:cells',
-    async (_e, args: { projectPath: string; which: DocKind }): Promise<CellPreviewResult> => {
+    async (_e, args: { projectPath: string }): Promise<CellPreviewResult> => {
       if (previewing) {
         return { ok: false, cells: [], error: 'A preview is already in progress.' }
       }
       previewing = true
       try {
-        return await previewCells(args.projectPath, args.which)
+        return await previewCells(args.projectPath)
       } finally {
         previewing = false
       }
     }
   )
 
+  // Open a rendered artifact in the OS viewer on demand — the manual counterpart
+  // to the auto-open below, for when the user has that toggle off.
+  ipcMain.handle('project:open-output', async (_e, path: string): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const err = await platform.openPath(path)
+      return err ? { ok: false, error: err } : { ok: true }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+  })
+
   ipcMain.handle(
     'project:render',
-    async (_e, args: { projectPath: string; which: DocKind; format: RenderFormat }): Promise<RenderResult> => {
+    async (
+      _e,
+      args: { projectPath: string; format: RenderFormat; open?: boolean }
+    ): Promise<RenderResult> => {
       if (current) {
         return { ok: false, outputPath: null, error: 'A render is already in progress.' }
       }
-      const file = FILES[args.which]
+      const file = MANUSCRIPT_FILE
       const send = (s: string): void => {
         getWindow()?.webContents.send('project:render:data', s)
       }
@@ -742,10 +693,17 @@ export function registerQuarto(ipcMain: IpcMain, getWindow: () => BrowserWindow 
         getWindow()?.webContents.send('project:render:exit', { code, ok: r.ok, outputPath: r.outputPath })
         return r
       }
+      // `open` defaults to true so an older renderer (or any other caller) keeps
+      // the previous behaviour; the workspace passes the user's toggle through.
+      const autoOpen = args.open !== false
       const openBestEffort = async (p: string): Promise<void> => {
+        if (!autoOpen) {
+          send(`\n✓ Rendered ${basename(p)}\n`)
+          return
+        }
         send(`\n✓ Rendered ${basename(p)} — opening…\n`)
         try {
-          const err = await shell.openPath(p)
+          const err = await platform.openPath(p)
           if (err) send(`(could not open ${p}: ${err})\n`)
         } catch {
           /* opening is best-effort */
@@ -796,7 +754,7 @@ export function registerQuarto(ipcMain: IpcMain, getWindow: () => BrowserWindow 
           return finish({ ok: true, outputPath: dest }, 0)
         }
 
-        // HTML / revealjs: no LaTeX, no .log churn — render in place.
+        // HTML: no LaTeX, no .log churn — render in place.
         const predicted = await outputPath(args.projectPath, file, args.format)
         const r = await runStreaming(
           `quarto render ${shq(file)} --to ${args.format}`,

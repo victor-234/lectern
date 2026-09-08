@@ -37,8 +37,10 @@
 
   const active = $derived(sessions.find((s) => s.id === activeId) ?? null)
 
-  // Dock height in px when open; the user drags the top edge to resize. Each
-  // session's ResizeObserver refits xterm + its pty whenever this changes.
+  // Dock height in px when open; the user drags the top edge to resize. The dock
+  // is a flex row in the center column (VSCode-style), so this height is taken
+  // out of the view above rather than covering it. Each session's ResizeObserver
+  // refits xterm + its pty whenever this changes.
   let height = $state(220)
   const MIN_H = 90
   // True while dragging the resizer — mounts a full-window shield so mouse events
@@ -51,7 +53,11 @@
     e.stopPropagation()
     const startY = e.clientY
     const startH = height
-    const maxH = window.innerHeight - 120
+    // The dock now takes its height out of the column it lives in, so cap it
+    // against that column (leaving a usable strip of the view above) rather than
+    // against the window.
+    const col = (e.currentTarget as HTMLElement).closest('.termdock')?.parentElement
+    const maxH = Math.max(MIN_H, (col?.clientHeight ?? window.innerHeight) - 120)
     resizing = true
     const onMove = (ev: MouseEvent): void => {
       // Dock is anchored at the bottom, so dragging up (smaller clientY) grows it.
@@ -153,10 +159,10 @@
   <div class="term-drag-shield"></div>
 {/if}
 <div class="termdock {open ? 'open' : 'closed'}">
-  <!-- The whole panel floats over the workspace (anchored to the bottom, growing
-       upward) so resizing never reflows the manuscript area. The header bar sits
-       at the top; session panes stay mounted across open/close so the ptys
-       survive. -->
+  <!-- The panel is a real row at the bottom of the center column: opening it or
+       dragging the resizer shrinks the view above by exactly this height. The
+       header bar sits at the top; session panes stay mounted across open/close
+       so the ptys survive. -->
   <div class="term-panel" style={open ? `height: ${height}px` : ''}>
     {#if open}
       <div

@@ -1,4 +1,4 @@
-import type { IpcMain, BrowserWindow } from 'electron'
+import type { IpcLike, WindowLike } from './platform'
 
 /**
  * Bridges embedded PTYs to xterm.js instances in the renderer.
@@ -14,12 +14,20 @@ import type { IpcMain, BrowserWindow } from 'electron'
  * Claude Code TUI. node-pty is a native addon and must be rebuilt against
  * Electron's ABI (`npm run rebuild`); if it isn't present we degrade gracefully
  * and report it to the UI instead of crashing.
+ *
+ * Sessions outlive their xterm. Output is mirrored into a per-session ring
+ * buffer so a pane that was unmounted (the Inquiries modal closed while Claude
+ * kept working) can re-attach later, replay the scrollback and carry on — the
+ * process is owned by main, not by whichever view happens to be showing it.
  */
 export function registerPty(
-  ipcMain: IpcMain,
-  getWindow: () => BrowserWindow | null
+  ipcMain: IpcLike,
+  getWindow: () => WindowLike | null
 ): { killAll: () => void } {
   const procs = new Map<string, import('node-pty').IPty>()
+  /** Recent output per session, replayed on re-attach. */
+  const bufs = new Map<string, string>()
+  const MAX_BUFFER = 400_000
   let ptyMod: typeof import('node-pty') | null = null
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -34,6 +42,12 @@ export function registerPty(
       try { existing.kill() } catch { /* ignore */ }
       procs.delete(id)
     }
+    bufs.delete(id)
+  }
+
+  function remember(id: string, data: string): void {
+    const next = (bufs.get(id) ?? '') + data
+    bufs.set(id, next.length > MAX_BUFFER ? next.slice(next.length - MAX_BUFFER) : next)
   }
 
   // node-pty keeps emitting buffered output while the window is closing or
@@ -67,13 +81,26 @@ export function registerPty(
       env: { ...process.env, TERM: 'xterm-256color' }
     })
     procs.set(id, proc)
-    proc.onData((data) => safeSend('pty:data', { id, data }))
+    bufs.set(id, '')
+    proc.onData((data) => {
+      remember(id, data)
+      safeSend('pty:data', { id, data })
+    })
     proc.onExit(({ exitCode }) => {
       safeSend('pty:exit', { id, code: exitCode })
       if (procs.get(id) === proc) procs.delete(id)
     })
     return { ok: true }
   })
+
+  // Re-attach a freshly-mounted xterm to a session that is already running:
+  // reports whether the process is alive and hands back its recent output so
+  // the pane can replay it. (The caller nudges a resize afterwards, which makes
+  // the TUI redraw itself over the replayed bytes.)
+  ipcMain.handle('pty:attach', (_e, id: string) => ({
+    running: procs.has(id),
+    buffer: bufs.get(id) ?? ''
+  }))
 
   ipcMain.on('pty:write', (_e, msg: { id: string; data: string }) => procs.get(msg.id)?.write(msg.data))
   ipcMain.on('pty:resize', (_e, msg: { id: string; cols: number; rows: number }) => {

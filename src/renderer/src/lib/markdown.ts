@@ -3,7 +3,7 @@
  *
  * Block-aware: groups wrapped lines into real paragraphs, and handles fenced
  * code, headings (#–######), blockquotes, ordered/unordered lists, horizontal
- * rules and tables-free prose. Inline: **bold**, *em* / _em_, `code`,
+ * rules and GFM pipe tables. Inline: **bold**, *em* / _em_, `code`,
  * [text](url), and academic [@citekey] references. Input is HTML-escaped first,
  * so rendering untrusted manuscript text is safe.
  */
@@ -98,6 +98,33 @@ export function renderMarkdown(raw: string): string {
       continue
     }
 
+    // GFM pipe table: a header row followed by a `| --- | :--: |` delimiter.
+    if (line.includes('|') && isTableDelimiter(lines[i + 1])) {
+      flushPara()
+      closeList()
+      const aligns = tableCells(lines[i + 1]).map(alignOf)
+      const head = tableCells(line)
+      i += 2
+      const body: string[][] = []
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+        body.push(tableCells(lines[i]))
+        i++
+      }
+      const cell = (tag: 'th' | 'td', text: string, col: number): string =>
+        `<${tag}${aligns[col] ? ` style="text-align:${aligns[col]}"` : ''}>${inline(text)}</${tag}>`
+      const rows = body
+        .map((r) => '<tr>' + head.map((_h, c) => cell('td', r[c] ?? '', c)).join('') + '</tr>')
+        .join('')
+      out.push(
+        '<table><thead><tr>' +
+          head.map((h, c) => cell('th', h, c)).join('') +
+          '</tr></thead>' +
+          (rows ? `<tbody>${rows}</tbody>` : '') +
+          '</table>'
+      )
+      continue
+    }
+
     // Blockquote (consecutive `>` lines)
     if (/^\s*>\s?/.test(line)) {
       flushPara()
@@ -145,6 +172,27 @@ export function renderMarkdown(raw: string): string {
   flushPara()
   closeList()
   return out.join('\n')
+}
+
+/** `| --- | :---: | ---: |` — the row that turns the line above it into a table. */
+function isTableDelimiter(line: string | undefined): boolean {
+  if (!line || !line.includes('-')) return false
+  return /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(line)
+}
+
+/** Split a table row into cells, dropping the outer pipes. */
+function tableCells(line: string): string[] {
+  const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|')
+  return cells.map((c) => c.trim())
+}
+
+function alignOf(spec: string): '' | 'center' | 'right' | 'left' {
+  const left = spec.startsWith(':')
+  const right = spec.endsWith(':')
+  if (left && right) return 'center'
+  if (right) return 'right'
+  if (left) return 'left'
+  return ''
 }
 
 function esc(s: string): string {

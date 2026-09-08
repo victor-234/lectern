@@ -231,7 +231,7 @@
     flex-direction: column;
     background: var(--surface);
     border: 1px solid var(--border-strong);
-    border-radius: var(--r-lg);
+    border-radius: var(--r-md);
     box-shadow: var(--shadow-lg, var(--shadow-sm));
     overflow: hidden;
   }
@@ -308,7 +308,7 @@
     min-height: 0;
     overflow-y: auto;
     border: 1px solid var(--border);
-    border-radius: var(--r-md);
+    border-radius: var(--r-sm);
   }
   .br-table {
     width: 100%;
@@ -359,7 +359,7 @@
     padding: 1px 6px;
     background: var(--bg-sunken);
     border: 1px solid var(--border);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text);

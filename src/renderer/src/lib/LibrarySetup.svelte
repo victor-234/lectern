@@ -1,8 +1,15 @@
 <script lang="ts">
+  import FolderPicker from './FolderPicker.svelte'
+  import { hostInfo } from './pick'
+
   let { onready }: { onready: (root: string) => void } = $props()
 
   let defaultPath = $state('')
   let busy = $state(false)
+  // Only shown where the backend has no native dialog to raise for us — served
+  // from localhost, the folder to pick lives on the server, not in this browser.
+  let picking = $state(false)
+  let home = $state('')
 
   window.api.library.defaultPath().then((p) => (defaultPath = p))
 
@@ -12,12 +19,29 @@
     onready(root)
   }
   async function choose(): Promise<void> {
+    const host = await hostInfo()
+    if (!host.nativePickers) {
+      home = host.home
+      picking = true
+      return
+    }
     busy = true
     const root = await window.api.library.choose()
     if (root) onready(root)
     else busy = false
   }
+  async function chosen(path: string): Promise<void> {
+    picking = false
+    busy = true
+    const root = await window.api.library.choose(path)
+    if (root) onready(root)
+    else busy = false
+  }
 </script>
+
+{#if picking}
+  <FolderPicker start={defaultPath || home} onchoose={chosen} oncancel={() => (picking = false)} />
+{/if}
 
 <div class="setup">
   <div class="card">
@@ -60,7 +84,7 @@
     padding: 28px;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-md);
     box-shadow: var(--shadow-lg);
   }
   .brand {
@@ -106,7 +130,7 @@
     color: var(--text-secondary);
     background: var(--surface-inset);
     border: 1px solid var(--border);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     padding: 7px 10px;
     word-break: break-all;
   }

@@ -1,10 +1,10 @@
+import type { WindowLike } from './platform'
 import { watch, type FSWatcher } from 'chokidar'
-import type { BrowserWindow } from 'electron'
 import { promises as fs } from 'fs'
 import { join, basename, relative, sep } from 'path'
 import { enrichLibrary, sourcesDir, syncLibrary } from './library'
 import { inquiriesDir } from './inquiries'
-import { FILES } from './quarto'
+import { MANUSCRIPT_FILE } from './quarto'
 import { NOTES_FILE } from './notes'
 
 let watcher: FSWatcher | null = null
@@ -20,7 +20,7 @@ let docWatcher: FSWatcher | null = null
  */
 export async function watchLibrarySources(
   root: string,
-  getWindow: () => BrowserWindow | null
+  getWindow: () => WindowLike | null
 ): Promise<void> {
   await stopWatchingLibrary()
 
@@ -73,12 +73,12 @@ export async function stopWatchingLibrary(): Promise<void> {
 }
 
 /**
- * Watch the open project's `manuscript.qmd`/`slides.qmd` so edits made outside
- * the app — most often Claude addressing notes in the embedded terminal — light
- * up the editor live. Emits `project:doc:changed` with the changed doc kind; the
- * renderer re-reads and reconciles against its in-editor draft (it ignores the
- * app's own saves and never clobbers unsaved edits). Only one project is watched
- * at a time — calling again retargets; passing null stops.
+ * Watch the open project's `manuscript.qmd` so edits made outside the app — most
+ * often Claude addressing notes in the embedded terminal — light up the editor
+ * live. Emits `project:doc:changed`; the renderer re-reads and reconciles
+ * against its in-editor draft (it ignores the app's own saves and never
+ * clobbers unsaved edits). Only one project is watched at a time — calling
+ * again retargets; passing null stops.
  *
  * The project root (depth 0) plus the two curated nested config files are also
  * watched so root-level `*.md` edits — Claude updating LEARNED_EDITS.md, the
@@ -87,14 +87,12 @@ export async function stopWatchingLibrary(): Promise<void> {
  */
 export async function watchProjectDocs(
   projectPath: string | null,
-  getWindow: () => BrowserWindow | null
+  getWindow: () => WindowLike | null
 ): Promise<void> {
   await stopWatchingProjectDocs()
   if (!projectPath) return
 
-  const paths = (Object.entries(FILES) as Array<[keyof typeof FILES, string]>).map(
-    ([, file]) => join(projectPath, file)
-  )
+  const paths = [join(projectPath, MANUSCRIPT_FILE)]
   // Also watch MANUSCRIPT_NOTES.md so the Notes panel refreshes when Claude (the
   // address-notes skill) marks notes done — done notes then drop out of the panel.
   paths.push(join(projectPath, NOTES_FILE))
@@ -115,9 +113,8 @@ export async function watchProjectDocs(
       getWindow()?.webContents.send('project:notes:changed')
       return
     }
-    const which = (Object.keys(FILES) as Array<keyof typeof FILES>).find((k) => FILES[k] === file)
-    if (which) {
-      getWindow()?.webContents.send('project:doc:changed', which)
+    if (file === MANUSCRIPT_FILE) {
+      getWindow()?.webContents.send('project:doc:changed')
       return
     }
     const lower = file.toLowerCase()
@@ -140,7 +137,7 @@ export async function stopWatchingProjectDocs(): Promise<void> {
   }
 }
 
-async function syncAndNotify(root: string, getWindow: () => BrowserWindow | null): Promise<void> {
+async function syncAndNotify(root: string, getWindow: () => WindowLike | null): Promise<void> {
   const changed = await syncLibrary(root)
   const notify = (): void => {
     getWindow()?.webContents.send('library:changed')

@@ -1,4 +1,4 @@
-import type { IpcMain } from 'electron'
+import type { IpcLike } from './platform'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 
@@ -155,7 +155,7 @@ export async function gitSync(projectPath: string): Promise<GitSyncResult> {
   }
 }
 
-export function registerGit(ipcMain: IpcMain): void {
+export function registerGit(ipcMain: IpcLike): void {
   ipcMain.handle('project:git:status', (_e, args: { projectPath: string; fetch?: boolean }) =>
     gitStatus(args.projectPath, args.fetch ?? false)
   )

@@ -335,7 +335,7 @@
     max-height: 80vh;
     background: var(--surface);
     border: 1px solid var(--border-strong);
-    border-radius: var(--r-md);
+    border-radius: var(--r-sm);
     box-shadow: var(--shadow-pop, var(--shadow-sm));
   }
   .tm-head {
@@ -376,7 +376,7 @@
   /* Group container */
   .tm-group {
     border: 1px solid var(--border);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     background: var(--surface);
   }
   .tm-group[data-drop='true'] {
@@ -469,7 +469,7 @@
     color: var(--text-faint);
     padding: 8px 4px 8px 18px;
     border: 1px dashed var(--border);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
   }
 
   .tm-grow__name {
@@ -480,7 +480,7 @@
     color: var(--text);
     background: var(--surface-inset);
     border: 1px solid var(--border);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     padding: 6px 9px;
   }
   .tm-grow__name:focus {
@@ -506,7 +506,7 @@
     color: var(--text);
     background: var(--accent-weak);
     border: 1px solid var(--accent-line);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     padding: 6px 12px;
     cursor: pointer;
   }

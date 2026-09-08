@@ -144,7 +144,7 @@
     padding: 10px;
     background: var(--surface);
     border: 1px solid var(--border-strong);
-    border-radius: var(--r-md, 8px);
+    border-radius: var(--r-sm, 8px);
     box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.35));
   }
   .git-head {
@@ -183,7 +183,7 @@
     gap: 8px;
     font-size: 12px;
     padding: 2px 4px;
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
   }
   .git-file-badge {
     flex: none;
@@ -218,7 +218,7 @@
     overflow: auto;
     padding: 8px;
     background: var(--surface-inset);
-    border-radius: var(--r-sm);
+    border-radius: var(--r-xs);
     font-family: var(--font-mono, monospace);
     font-size: 10.5px;
     line-height: 1.5;

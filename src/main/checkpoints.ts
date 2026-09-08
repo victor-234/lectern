@@ -1,4 +1,4 @@
-import type { IpcMain, BrowserWindow } from 'electron'
+import type { IpcLike, WindowLike } from './platform'
 import { execFile } from 'child_process'
 import { promises as fs } from 'fs'
 import { join, relative, sep } from 'path'
@@ -600,8 +600,10 @@ function mergeHook(settings: Record<string, unknown>, event: string, timeout: nu
 
 /**
  * Install the checkpoint hooks into a project, preserving whatever else is in
- * its `.claude/settings.json`. Idempotent, so it can run on every project open —
- * which is what backfills projects scaffolded before this feature existed.
+ * its `.claude/settings.json` — and clear any legacy pinned `model` while we're
+ * in there, so sessions always start on Claude Code's default. Idempotent, so it
+ * can run on every project open — which is what backfills projects scaffolded
+ * before these existed.
  *
  * `UserPromptSubmit` is the one that matters: it blocks until Lectern has the
  * snapshot, guaranteeing a baseline exists before Claude's first edit. 60s is
@@ -630,6 +632,13 @@ export async function ensureCheckpointHooks(projectPath: string): Promise<void> 
 
     let changed = mergeHook(settings, 'UserPromptSubmit', 60)
     changed = mergeHook(settings, 'Stop', 20) || changed
+    // Projects scaffolded before this pinned a `model` here, freezing their
+    // sessions on whatever was current the day they were created. Sessions run
+    // on Claude Code's own default now, so drop the pin wherever it survives.
+    if ('model' in settings) {
+      delete settings.model
+      changed = true
+    }
     if (changed) await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf8')
   } catch {
     // Checkpoints are a convenience; never fail opening a project over them.
@@ -638,7 +647,7 @@ export async function ensureCheckpointHooks(projectPath: string): Promise<void> 
 
 // --- IPC ---------------------------------------------------------------------
 
-export function registerCheckpoints(ipcMain: IpcMain, getWindow: () => BrowserWindow | null): void {
+export function registerCheckpoints(ipcMain: IpcLike, getWindow: () => WindowLike | null): void {
   /**
    * Announce that a project's review state moved. Deciding a turn has to emit
    * this too, not just the hook feed in bridge.ts — the toolbar's pending count

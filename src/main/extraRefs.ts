@@ -1,3 +1,4 @@
+import type { IpcLike } from './platform'
 /**
  * Per-project "manual references": citations the user wants to cite from a
  * manuscript but does NOT want in the global library registry (policy articles,
@@ -13,7 +14,6 @@
  */
 import { promises as fs } from 'fs'
 import { join, resolve, sep } from 'path'
-import type { IpcMain } from 'electron'
 
 const CONFIG_DIR = '.lctrn'
 const STORE = 'extra-refs.json' // structured source of truth
@@ -27,7 +27,7 @@ const EXTRA_BIB_REL = '.lctrn/extra.bib'
 // `references.bib` is a name lctrn owns (see scaffold docs), so a bare list entry
 // is safe to migrate onto the live master path.
 const LEGACY_LIB_BIB = 'references.bib'
-const MANUSCRIPTS = ['manuscript.qmd', 'slides.qmd']
+const MANUSCRIPT = 'manuscript.qmd'
 
 export type ManualRefType = 'article' | 'misc' | 'report' | 'online' | 'book'
 
@@ -255,21 +255,19 @@ export function withExtraBib(qmd: string): string | null {
 }
 
 async function ensureBibInFrontMatter(projectPath: string): Promise<void> {
-  for (const name of MANUSCRIPTS) {
-    const p = safe(projectPath, name)
-    let content: string
-    try {
-      content = await fs.readFile(p, 'utf8')
-    } catch {
-      continue
-    }
-    const updated = withExtraBib(content)
-    if (updated && updated !== content) await fs.writeFile(p, updated, 'utf8')
+  const p = safe(projectPath, MANUSCRIPT)
+  let content: string
+  try {
+    content = await fs.readFile(p, 'utf8')
+  } catch {
+    return
   }
+  const updated = withExtraBib(content)
+  if (updated && updated !== content) await fs.writeFile(p, updated, 'utf8')
 }
 
 /**
- * Make sure the project's `extra.bib` exists and is wired into both manuscripts.
+ * Make sure the project's `extra.bib` exists and is wired into the manuscript.
  * Safe to call on every project open (idempotent). Hooked into `ensureQuartoDocs`.
  */
 export async function ensureExtraBib(projectPath: string): Promise<void> {
@@ -319,7 +317,7 @@ export async function deleteManualRef(projectPath: string, citekey: string): Pro
 
 // --- IPC ---------------------------------------------------------------------
 
-export function registerExtraRefs(ipcMain: IpcMain): void {
+export function registerExtraRefs(ipcMain: IpcLike): void {
   ipcMain.handle('project:extraRefs:list', (_e, projectPath: string) => listManualRefs(projectPath))
   ipcMain.handle('project:extraRefs:add', (_e, args: { projectPath: string; ref: Partial<ManualRef> }) =>
     addManualRef(args.projectPath, args.ref)

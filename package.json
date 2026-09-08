@@ -8,12 +8,15 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "rebuild": "electron-rebuild -f -w node-pty",
-    "postinstall": "electron-rebuild -f -w node-pty || true",
-    "package": "npm run build && npm run rebuild && electron-builder --mac"
+    "postinstall": "node scripts/postinstall.js",
+    "package": "npm run build && npm run rebuild && electron-builder --mac",
+    "build:server": "vite build --config vite.server.config.ts",
+    "serve": "npm run build && npm run build:server && node bin/lectern.js"
   },
   "devDependencies": {
     "@electron/rebuild": "latest",
     "@sveltejs/vite-plugin-svelte": "^6.0.0",
+    "@types/ws": "^8.18.1",
     "electron": "latest",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
@@ -22,6 +25,7 @@
     "vite": "^7.0.0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.3",
     "@codemirror/lang-markdown": "^6.5.0",
@@ -34,6 +38,17 @@
     "@xterm/xterm": "latest",
     "chokidar": "^4.0.3",
     "node-pty": "latest",
-    "unpdf": "^1.6.2"
-  }
+    "pdf-lib": "^1.17.1",
+    "unpdf": "^1.6.2",
+    "ws": "^8.21.3"
+  },
+  "bin": {
+    "lectern": "bin/lectern.js"
+  },
+  "files": [
+    "out/",
+    "bin/",
+    "scripts/postinstall.js",
+    "resources/"
+  ]
 }

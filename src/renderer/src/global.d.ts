@@ -10,7 +10,6 @@ import type {
 import type { ProjectMeta } from '../../main/scaffold'
 import type {
   QuartoDoc,
-  DocKind,
   RenderFormat,
   RenderResult,
   CellOutput,
@@ -19,9 +18,13 @@ import type {
 import type { ManuscriptNote } from '../../main/notes'
 import type { RevisingState, FinishResult } from '../../main/revising'
 import type { PaperNote } from '../../main/paperNotes'
+import type { PaperText } from '../../main/paperText'
+import type { SemanticHit, SemanticResult } from '../../main/paperSearch'
 import type { ConfigFile, ConfigFileInfo, ConfigFileSpec } from '../../main/projectFiles'
 import type { ManualRef, ManualRefType } from '../../main/extraRefs'
 import type { GitStatus, GitFileChange, GitSyncResult } from '../../main/git'
+import type { ApiKeyState } from '../../main/writingRules'
+import type { RewriteRequest, RewriteResult } from '../../main/rewrite'
 import type { ReviewState, Checkpoint, CheckpointFile } from '../../main/checkpoints'
 import type {
   InquirySelection,
@@ -46,7 +49,6 @@ export type {
   PaperPatch,
   ProjectMeta,
   QuartoDoc,
-  DocKind,
   RenderFormat,
   RenderResult,
   CellOutput,
@@ -55,6 +57,9 @@ export type {
   RevisingState,
   FinishResult,
   PaperNote,
+  PaperText,
+  SemanticHit,
+  SemanticResult,
   ConfigFile,
   ConfigFileInfo,
   ConfigFileSpec,
@@ -63,6 +68,9 @@ export type {
   GitStatus,
   GitFileChange,
   GitSyncResult,
+  ApiKeyState,
+  RewriteRequest,
+  RewriteResult,
   ReviewState,
   Checkpoint,
   CheckpointFile,
