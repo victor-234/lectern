@@ -180,9 +180,12 @@ app.whenReady().then(() => {
   // Only the native file dialogs and the PDF find-in-page are supplied here.
   const core = registerCore(ipcMain, () => mainWindow, {
     host: { mode: 'desktop', nativePickers: true, home: app.getPath('home') },
-    async pickDirectory() {
+    async pickDirectory(requested) {
       const res = await dialog.showOpenDialog({
         properties: ['openDirectory', 'createDirectory'],
+        // Start where the current library lives, so "change folder" opens next
+        // to it rather than in whatever directory the dialog last remembered.
+        defaultPath: requested ?? undefined,
         message: 'Choose or create your lctrn library folder'
       })
       return res.canceled ? null : (res.filePaths[0] ?? null)

@@ -220,7 +220,11 @@ export async function setLastProject(path: string | null): Promise<void> {
 
 export async function setLibraryRoot(root: string): Promise<string> {
   await ensureLibrary(root)
-  await writeSettings({ ...(await readSettings()), libraryRoot: root })
+  const prev = await readSettings()
+  // `lastProject` is an absolute path INTO the library we're leaving, so it means
+  // nothing once the root moves. Keep it only when the root didn't actually change.
+  const lastProject = prev.libraryRoot === root ? prev.lastProject : undefined
+  await writeSettings({ ...prev, libraryRoot: root, lastProject })
   // The master bib records each PDF's ABSOLUTE path in its `file = {…}` field,
   // which stops being true the moment the library arrives from somewhere else —
   // a Dropbox folder opened on a second machine with a different home directory,

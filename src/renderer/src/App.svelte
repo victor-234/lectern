@@ -17,7 +17,8 @@
   import ReviewPanel from './lib/ReviewPanel.svelte'
   import QuickOpen from './lib/QuickOpen.svelte'
   import { inquiryRun } from './lib/inquiryRun.svelte'
-  import { addPapers as pickPapers } from './lib/pick'
+  import FolderPicker from './lib/FolderPicker.svelte'
+  import { addPapers as pickPapers, hostInfo } from './lib/pick'
   import { EditorView } from '@codemirror/view'
   import { openSearchPanel } from '@codemirror/search'
   import type { WorkspaceToolbar } from './lib/QuartoView.svelte'
@@ -389,6 +390,47 @@
   async function onLibraryReady(root: string): Promise<void> {
     libraryRoot = root
     await Promise.all([loadProjects(), loadLibrary()])
+  }
+
+  // ---- switching library folder ---------------------------------------------
+  let libMenuOpen = $state(false)
+  // Set only on the localhost host, where there's no native dialog to raise and
+  // the folder is browsed on the SERVER's disk instead (see pick.ts).
+  let libPicking = $state(false)
+  let libPickStart = $state('')
+
+  /**
+   * Point lctrn at a different library folder.
+   *
+   * Opening a library that already exists is cheap and non-destructive: papers
+   * carry their metadata in `.lctrn/library.json` and are never re-imported or
+   * re-enriched (enrichment skips anything already stamped), PDFs are not
+   * renamed, and cached text/embeddings are left alone. The one thing rewritten
+   * is `.lctrn/references.bib`, whose `file = {…}` fields hold ABSOLUTE paths
+   * that stop being true when a library arrives from another machine.
+   *
+   * Everything on screen — open reader tabs, the selected project, the paper
+   * table — belongs to the old library, so reload rather than trying to
+   * reconcile it piecemeal.
+   */
+  async function changeLibrary(): Promise<void> {
+    const host = await hostInfo()
+    if (!host.nativePickers) {
+      libPickStart = libraryRoot ?? host.home
+      libPicking = true
+      return
+    }
+    applyLibraryChange(await window.api.library.choose(libraryRoot))
+  }
+
+  async function libraryPicked(path: string): Promise<void> {
+    libPicking = false
+    applyLibraryChange(await window.api.library.choose(path))
+  }
+
+  function applyLibraryChange(root: string | null): void {
+    // Null means the picker was dismissed; the same folder means nothing moved.
+    if (root && root !== libraryRoot) location.reload()
   }
 
   // ---- navigation -----------------------------------------------------------
@@ -858,9 +900,33 @@
          global view toggles. The middle zone changes with `mode`. -->
     <div class="topbar" data-mode={mode}>
       <!-- Identity -->
-      <div class="tb-brand" title={libraryRoot}>
+      <div class="tb-brand">
         <b>lctrn</b>
-        {#if libraryName}<span class="tb-lib">{libraryName}</span>{/if}
+        <button
+          class="tb-libbtn"
+          title={libraryRoot}
+          aria-haspopup="menu"
+          aria-expanded={libMenuOpen}
+          onclick={() => (libMenuOpen = !libMenuOpen)}
+        >
+          <span class="tb-lib">{libraryName}</span>
+          <span class="caret"><Icon n="chevron-down" /></span>
+        </button>
+        {#if libMenuOpen}
+          <button class="proj-backdrop" aria-label="Close menu" onclick={() => (libMenuOpen = false)}></button>
+          <div class="proj-menu lib-menu">
+            <div class="lib-path">{libraryRoot}</div>
+            <div class="proj-sep"></div>
+            <button
+              class="proj-row"
+              title="Open a different library folder. Existing libraries open as they are — nothing is re-imported or renamed."
+              onclick={() => { libMenuOpen = false; void changeLibrary() }}
+            >
+              <Icon n="folder" />
+              <span class="proj-name">Change folder…</span>
+            </button>
+          </div>
+        {/if}
       </div>
 
       <span class="tb-div" aria-hidden="true"></span>
@@ -1400,6 +1466,13 @@
     />
   {/if}
 
+  {#if libPicking}
+    <FolderPicker
+      start={libPickStart}
+      onchoose={libraryPicked}
+      oncancel={() => (libPicking = false)}
+    />
+  {/if}
   {#if claudeSetupOpen}
     <ClaudeSetup onclose={() => (claudeSetupOpen = false)} />
   {/if}
@@ -1496,6 +1569,45 @@
   .tb-caret :global(svg) {
     width: 12px;
     height: 12px;
+  }
+
+  /* The library name in the brand zone doubles as the library switcher. */
+  .tb-brand {
+    position: relative;
+  }
+  .tb-libbtn {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+    border-radius: var(--r-xs);
+    cursor: pointer;
+  }
+  .tb-libbtn:hover {
+    background: var(--surface-inset);
+  }
+  .tb-libbtn .caret {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-faint);
+  }
+  .tb-libbtn .caret :global(svg) {
+    width: 12px;
+    height: 12px;
+  }
+  .lib-menu {
+    min-width: 250px;
+  }
+  /* The full root, since the bar only has room for the folder's last segment. */
+  .lib-path {
+    padding: 6px 9px 5px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    line-height: 1.45;
+    color: var(--text-faint);
+    word-break: break-all;
   }
 
   /* Workspace project switcher (replaces the sidebar's Projects list).

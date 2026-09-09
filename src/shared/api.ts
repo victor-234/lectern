@@ -83,8 +83,9 @@ export function createApi(t: Transport) {
       get: (): Promise<string | null> => t.invoke('library:get'),
       defaultPath: (): Promise<string> => t.invoke('library:defaultPath'),
       useDefault: (): Promise<string> => t.invoke('library:useDefault'),
-      // `path` is honoured only where the renderer can name one (server mode);
-      // the desktop app raises its native dialog and ignores it.
+      // Served from localhost `path` IS the choice (the renderer browsed the
+      // server's disk to name it); the desktop app raises its native dialog and
+      // uses `path` only as the directory to open it at.
       choose: (path: string | null = null): Promise<string | null> =>
         t.invoke('library:choose', path),
       papers: () => t.invoke('library:papers'),
