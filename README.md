@@ -20,8 +20,8 @@ Claude edits the same files you are looking at, and the app watches them change.
 ## Try it in one command
 
 ```bash
-git clone https://github.com/victor-234/lectern-2.git
-cd lectern-2
+git clone https://github.com/victor-234/lectern.git
+cd lectern
 npm install
 npm run serve -- --demo --library ./lectern-demo
 ```

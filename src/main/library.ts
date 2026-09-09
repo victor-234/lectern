@@ -59,9 +59,13 @@ async function migrateSettingsFile(): Promise<void> {
     /* fall through and look for a legacy file */
   }
   const appData = platform.appDataDir()
+  // Frozen history, not current naming: these are paths where older builds
+  // actually wrote the settings file, so they must keep the names those builds
+  // used even after the project is renamed. Renaming a string here doesn't
+  // rename anything on disk — it just loses someone's library setting.
   const candidates = [
     join(platform.userDataDir(), 'lectern-settings.json'), // same userData, old filename
-    join(appData, 'lectern-2', 'lectern-settings.json'), // dev (old package name)
+    join(appData, 'lectern-2', 'lectern-settings.json'), // dev, when the package was named lectern-2
     join(appData, 'Lectern', 'lectern-settings.json') // packaged (old productName)
   ]
   for (const c of candidates) {

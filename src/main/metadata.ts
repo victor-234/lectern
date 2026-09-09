@@ -164,7 +164,7 @@ export function findDoi(text: string): string | undefined {
 function crossrefUserAgent(): string {
   const mailto = process.env.LCTRN_CONTACT_EMAIL?.trim()
   const contact = mailto ? `; mailto:${mailto}` : ''
-  return `lctrn/0.1 (https://github.com/victor-234/lectern-2${contact})`
+  return `lctrn/0.1 (https://github.com/victor-234/lectern${contact})`
 }
 
 async function fromCrossref(doi: string): Promise<Partial<ExtractedMeta> | null> {

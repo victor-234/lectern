@@ -1,5 +1,5 @@
 {
-  "name": "lctrn",
+  "name": "lectern",
   "version": "0.0.1",
   "description": "Local-filesystem orchestration layer for Claude Code — paper-pile + embedded-terminal spike",
   "main": "./out/main/index.js",
