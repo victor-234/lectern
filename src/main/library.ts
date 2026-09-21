@@ -642,6 +642,52 @@ async function writeRegistry(root: string, reg: Registry): Promise<void> {
   await fs.writeFile(registryPath(root), JSON.stringify(reg, null, 2) + '\n')
 }
 
+/** In-flight registry critical sections, keyed by library root. */
+const registryLocks = new Map<string, Promise<unknown>>()
+
+/**
+ * Serialize a registry read-modify-write against every other one for `root`.
+ *
+ * The watcher sync, metadata enrichment and house-style renames all mutate
+ * `library.json`, and unserialized they interleave destructively: a sync that
+ * reads the registry *before* a rename but the directory *after* it sees the old
+ * filename as vanished and the new one as new, so it drops the entry and re-adds
+ * it blank. A blank entry looks unenriched, so it gets re-enriched and
+ * re-renamed — and since the house name is now taken by its own twin, each lap
+ * mints another `-2`, `-3`, … copy. On a synced folder (Dropbox) that ran away
+ * into hundreds of conflicted copies overnight.
+ *
+ * NOT reentrant: never call one locked function from inside another.
+ */
+function withRegistryLock<T>(root: string, fn: () => Promise<T>): Promise<T> {
+  const prev = registryLocks.get(root) ?? Promise.resolve()
+  // Run `fn` whether or not the previous section settled cleanly.
+  const run = prev.then(fn, fn)
+  const tail = run.then(
+    () => undefined,
+    () => undefined
+  )
+  registryLocks.set(root, tail)
+  // Drop the entry once this root goes quiet, so the map doesn't grow forever.
+  void tail.then(() => {
+    if (registryLocks.get(root) === tail) registryLocks.delete(root)
+  })
+  return run
+}
+
+/** True when both paths exist and hold byte-identical content. */
+async function sameContent(a: string, b: string): Promise<boolean> {
+  try {
+    const [sa, sb] = await Promise.all([fs.stat(a), fs.stat(b)])
+    if (!sa.isFile() || !sb.isFile() || sa.size !== sb.size) return false
+    const [ba, bb] = await Promise.all([fs.readFile(a), fs.readFile(b)])
+    return ba.equals(bb)
+  } catch {
+    // Target missing is the normal case — nothing to collide with.
+    return false
+  }
+}
+
 export function resolvePaperPath(root: string, paper: LibraryPaper): string {
   return isAbsolute(paper.path) ? paper.path : join(root, paper.path)
 }
@@ -891,7 +937,7 @@ async function setJournalAbbrev(
 /** Outcome of a house-style rename; `reason` explains a no-op. */
 export interface RenameResult {
   renamed: boolean
-  reason?: 'sparse' | 'unchanged' | 'external' | 'missing'
+  reason?: 'sparse' | 'unchanged' | 'external' | 'missing' | 'duplicate'
   from?: string
   to?: string
 }
@@ -943,6 +989,10 @@ export async function previewHouseRenames(root: string): Promise<RenamePreviewIt
  * (returns renamed:false) when metadata is too sparse or the name is unchanged.
  */
 export async function renamePaperToHouseStyle(root: string, id: string): Promise<RenameResult> {
+  return withRegistryLock(root, () => renamePaperToHouseStyleLocked(root, id))
+}
+
+async function renamePaperToHouseStyleLocked(root: string, id: string): Promise<RenameResult> {
   const [reg, abbrevs] = await Promise.all([readRegistry(root), readJournalAbbrevs(root)])
   const p = reg.papers.find((x) => x.id === id)
   if (!p) return { renamed: false, reason: 'missing' }
@@ -970,7 +1020,15 @@ export async function renamePaperToHouseStyle(root: string, id: string): Promise
     return { renamed: false, reason: 'unchanged', from: currentName, to: currentName }
   }
 
-  // Don't clobber a different file that already owns the target name.
+  // A file already sitting at the target name whose bytes match this one is the
+  // same paper twice — a re-import, or a copy handed to us by file sync. Renaming
+  // into a fresh `-2` slot would only mint another twin (and give the next pass
+  // something new to collide with), so leave the file where it is.
+  if (await sameContent(abs, join(dir, newName))) {
+    return { renamed: false, reason: 'duplicate', from: currentName, to: newName }
+  }
+
+  // Don't clobber a *different* file that already owns the target name.
   const finalName = await uniqueFilename(dir, newName)
   await fs.rename(abs, join(dir, finalName))
   p.path = join(SOURCES_DIR, finalName)
@@ -1007,6 +1065,10 @@ export async function removeLibraryPaper(root: string, id: string): Promise<void
  */
 export async function syncLibrary(root: string): Promise<boolean> {
   await ensureLibrary(root)
+  return withRegistryLock(root, () => syncLibraryLocked(root))
+}
+
+async function syncLibraryLocked(root: string): Promise<boolean> {
   const reg = await readRegistry(root)
   let files: string[] = []
   try {
@@ -1090,19 +1152,26 @@ export async function enrichLibrary(root: string, onProgress?: () => void): Prom
         meta = { source: 'filename' }
       }
       // Re-read before writing — sync may have changed the registry meanwhile.
-      const reg = await readRegistry(root)
-      const target = reg.papers.find((p) => p.id === next.id)
-      if (!target) continue
-      if (!needsEnrichment(target)) continue // someone else enriched it
-      applyMeta(reg, target, meta)
-      await writeRegistry(root, reg)
-      await regenerateMasterBib(root)
+      // Held under the registry lock so a concurrent sync can't clobber the write
+      // (or observe the directory mid-rename); the rename below takes the lock
+      // itself, so it has to stay outside this section.
+      const applied = await withRegistryLock(root, async () => {
+        const reg = await readRegistry(root)
+        const target = reg.papers.find((p) => p.id === next.id)
+        if (!target) return false
+        if (!needsEnrichment(target)) return false // someone else enriched it
+        applyMeta(reg, target, meta)
+        await writeRegistry(root, reg)
+        await regenerateMasterBib(root)
+        return true
+      })
+      if (!applied) continue
       // Now that we have real metadata, put the on-disk file into house style
       // (e.g. "Wagner et al. 2024 JFE, Corp governance.pdf"). Best-effort: a
       // paper too sparse to name, already in style, or outside sources/ just
       // keeps its filename, and a rename hiccup never derails enrichment.
       try {
-        await renamePaperToHouseStyle(root, target.id)
+        await renamePaperToHouseStyle(root, next.id)
       } catch {
         // leave the filename as-is — the metadata itself was saved above
       }
