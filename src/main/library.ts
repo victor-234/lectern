@@ -675,6 +675,40 @@ function withRegistryLock<T>(root: string, fn: () => Promise<T>): Promise<T> {
   return run
 }
 
+/**
+ * Filenames are compared through this, never with `===`.
+ *
+ * macOS stores names decomposed (NFD: `a` + combining diaeresis) while JSON,
+ * Crossref and the sync engine hand us composed ones (NFC: `ä`). The two are the
+ * same file to the filesystem but different JavaScript strings, so a registry
+ * path could fail to match its own `readdir` entry — the registry would drop the
+ * paper as missing and re-add it blank, which is what set the enrich/rename
+ * cycle going. Almost every paper this ran away on had an accent in its name.
+ */
+function nameKey(name: string): string {
+  return name.normalize('NFC')
+}
+
+/**
+ * True when `currentName` is `houseName`, or `houseName` with the `-2`, `-3`, …
+ * disambiguating suffix `uniqueFilename` hands out. Both count as already named
+ * correctly, so a paper parked in a numbered slot stays put.
+ */
+function isHouseStyleName(currentName: string, houseName: string): boolean {
+  const current = nameKey(currentName)
+  const house = nameKey(houseName)
+  if (current === house) return true
+  const ext = extname(house)
+  const base = basename(house, ext)
+  if (extname(current) !== ext) return false
+  return new RegExp(`^${escapeRegExp(base)}-\\d+$`).test(basename(current, ext))
+}
+
+/** Escape a literal string for use inside a RegExp. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 /** True when both paths exist and hold byte-identical content. */
 async function sameContent(a: string, b: string): Promise<boolean> {
   try {
@@ -1016,7 +1050,14 @@ async function renamePaperToHouseStyleLocked(root: string, id: string): Promise<
 
   const dir = sourcesDir(root)
   const currentName = basename(abs)
-  if (newName === currentName) {
+  // Already in house style — including a `-2`/`-3` variant this paper was given
+  // because a *different* paper of the same authors/year/journal/title already
+  // held the plain name. Without this, the two of them trade the free slot back
+  // and forth forever: each pass sees a name that isn't the bare house name,
+  // renames towards it, frees the slot the other one then takes. Every lap
+  // rewrites the registry and (on a synced folder) gives the sync engine a
+  // rename to race, which is how entries got blanked and re-enriched on a loop.
+  if (isHouseStyleName(currentName, newName)) {
     return { renamed: false, reason: 'unchanged', from: currentName, to: currentName }
   }
 
@@ -1076,14 +1117,14 @@ async function syncLibraryLocked(root: string): Promise<boolean> {
   } catch {
     files = []
   }
-  const present = new Set(files)
+  const present = new Set(files.map(nameKey))
   let changed = false
 
   // Drop entries whose source file is gone.
   const kept: LibraryPaper[] = []
   for (const p of reg.papers) {
     const abs = resolvePaperPath(root, p)
-    if (isInsideSources(root, abs) && !present.has(basename(abs))) {
+    if (isInsideSources(root, abs) && !present.has(nameKey(basename(abs)))) {
       changed = true
       continue
     }
@@ -1096,10 +1137,10 @@ async function syncLibraryLocked(root: string): Promise<boolean> {
     reg.papers
       .map((p) => resolvePaperPath(root, p))
       .filter((abs) => isInsideSources(root, abs))
-      .map((abs) => basename(abs))
+      .map((abs) => nameKey(basename(abs)))
   )
   for (const f of files) {
-    if (known.has(f)) continue
+    if (known.has(nameKey(f))) continue
     const name = f.replace(/\.pdf$/i, '')
     const id = uniqueId(reg, slug(name))
     reg.papers.push({
