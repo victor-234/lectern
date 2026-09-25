@@ -315,8 +315,7 @@
     <div class="insp-empty">Select a paper to inspect its metadata, abstract, and analyses.</div>
   {:else}
     <div class="insp-head">
-      <div class="insp-titlerow">
-        <h3 class="insp-title">{paper.title || paper.citekey}</h3>
+      <div class="insp-actions">
         {#if onread && paper.exists && !editing}
           <button class="iconbtn" title="Open PDF in Reader" onclick={() => onread(paper)}><Icon n="pdf" /></button>
         {/if}
@@ -361,6 +360,7 @@
           ><Icon n="trash" /></button>
         {/if}
       </div>
+      <h3 class="insp-title">{paper.title || paper.citekey}</h3>
       <div class="insp-authors">{authorList}</div>
     </div>
 
@@ -524,18 +524,20 @@
 </aside>
 
 <style>
-  .insp-titlerow {
+  /* Action buttons sit on their own row above the title, so the title
+     always gets the full inspector width instead of wrapping beside them. */
+  .insp-actions {
     display: flex;
-    align-items: flex-start;
-    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 2px;
+    margin: -4px -6px 0 0;
   }
-  .insp-titlerow .insp-title {
-    flex: 1;
-    min-width: 0;
+  .insp-actions:empty {
+    display: none;
   }
-  .insp-titlerow .iconbtn {
+  .insp-actions .iconbtn {
     flex: none;
-    margin-top: 6px;
   }
   .frm {
     display: flex;

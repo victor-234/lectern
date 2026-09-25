@@ -239,7 +239,7 @@ body { overflow: hidden; }
 .inspector { background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 .insp-head { padding: 14px 16px 12px; border-bottom: 1px solid var(--border-subtle); }
 .insp-eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; color: var(--text-muted); display: flex; align-items: center; gap: 7px; }
-.insp-title { font-family: var(--font-sans); font-size: 16px; font-weight: 600; line-height: 1.25; color: var(--text); margin: 9px 0 6px; text-wrap: pretty; }
+.insp-title { font-family: var(--font-sans); font-size: 16px; font-weight: 600; line-height: 1.25; color: var(--text); margin: 4px 0 6px; text-wrap: pretty; overflow-wrap: anywhere; }
 .insp-authors { font-family: var(--font-sans); font-size: 12px; color: var(--text-secondary); }
 .insp-scroll { flex: 1; overflow-y: auto; padding: 14px 16px; }
 .insp-sec { margin-bottom: 16px; }
