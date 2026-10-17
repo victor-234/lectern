@@ -846,11 +846,11 @@ export async function findDuplicates(
   const out = new Map<string, DuplicateMatch>()
   const existing = reg.papers.map((p) => {
     const abs = resolvePaperPath(root, p)
-    return { p, abs, file: basename(abs).toLowerCase(), key: slug(p.citekey) }
+    return { p, abs, file: nameKey(basename(abs)).toLowerCase(), key: slug(p.citekey) }
   })
   for (const fp of filePaths) {
     if (existing.some((e) => e.abs === fp)) continue
-    const file = basename(fp).toLowerCase()
+    const file = nameKey(basename(fp)).toLowerCase()
     const key = slug(basename(fp).replace(/\.pdf$/i, ''))
     for (const e of existing) {
       const reasons: DuplicateMatch['reasons'] = []
