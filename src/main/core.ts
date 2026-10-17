@@ -20,6 +20,7 @@
  *     plain page jump".
  */
 
+import { randomUUID } from 'crypto'
 import { promises as fs } from 'fs'
 import { homedir } from 'os'
 import { join, dirname, resolve as resolvePath } from 'path'
@@ -28,6 +29,9 @@ import { registerPty } from './pty'
 import { readProjectInfo, type ProjectMeta } from './scaffold'
 import {
   addLibraryPapers,
+  findDuplicates,
+  type DuplicateMatch,
+  type ResolvedPaper,
   addProjectPaper,
   createProject,
   defaultLibraryRoot,
@@ -104,6 +108,12 @@ export interface CoreDeps {
   clearHighlight?(): void
   /** Identifies the host to the renderer — see the `host:info` handler. */
   host: HostInfo
+}
+
+/** What `library:addPapers` did, and any look-alikes it held back for confirmation. */
+export interface AddPapersResult {
+  added: ResolvedPaper[]
+  duplicates: { token: string; matches: DuplicateMatch[] } | null
 }
 
 /** What the renderer needs to know about where its backend is running. */
@@ -205,15 +215,37 @@ export function registerCore(
     const root = await getLibraryRoot()
     return root ? listLibraryPapers(root) : []
   })
-  ipc.handle('library:addPapers', async (_e, staged: string[] | null = null) => {
-    const root = await getLibraryRoot()
-    if (!root) return []
-    const files = await deps.pickPdfs(staged)
+  // Picked files that look like papers already in the library are held back
+  // here until the user confirms them. The renderer answers by index into the
+  // held list, so it never gets to name a path for us to copy.
+  const heldDuplicates = new Map<string, { root: string; files: string[] }>()
+  const addAndEnrich = async (root: string, files: string[]): Promise<ResolvedPaper[]> => {
     if (!files.length) return []
     const added = await addLibraryPapers(root, files)
     // Fetch real metadata in the background; refresh the UI as each entry fills in.
     void enrichLibrary(root, () => send(getWindow, 'library:changed'))
     return added
+  }
+  ipc.handle('library:addPapers', async (_e, staged: string[] | null = null): Promise<AddPapersResult> => {
+    const none = { added: [], duplicates: null }
+    const root = await getLibraryRoot()
+    if (!root) return none
+    const files = await deps.pickPdfs(staged)
+    if (!files.length) return none
+    const dupes = await findDuplicates(root, files)
+    const added = await addAndEnrich(root, files.filter((f) => !dupes.has(f)))
+    if (!dupes.size) return { added, duplicates: null }
+    const token = randomUUID()
+    heldDuplicates.set(token, { root, files: [...dupes.keys()] })
+    return { added, duplicates: { token, matches: [...dupes.values()] } }
+  })
+  // `accept` indexes `duplicates.matches` from addPapers; an empty list skips them all.
+  ipc.handle('library:resolveDuplicates', async (_e, args: { token: string; accept: number[] }) => {
+    const held = heldDuplicates.get(args.token)
+    heldDuplicates.delete(args.token)
+    if (!held) return []
+    const files = [...new Set(args.accept)].map((i) => held.files[i]).filter((f): f is string => !!f)
+    return addAndEnrich(held.root, files)
   })
   ipc.handle('library:tags', async () => {
     const root = await getLibraryRoot()

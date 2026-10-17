@@ -15,7 +15,7 @@
  * Both end at the same `library:choose` / `library:addPapers` handlers.
  */
 
-import type { HostInfo } from '../../../main/core'
+import type { AddPapersResult, HostInfo } from '../../../main/core'
 
 let cached: Promise<HostInfo> | null = null
 
@@ -65,13 +65,13 @@ function promptForFiles(): Promise<File[] | null> {
 }
 
 /**
- * Add papers to the library, whichever host we're on. Returns what was added,
- * or an empty list if the user backed out.
+ * Add papers to the library, whichever host we're on. Returns what was added
+ * plus any duplicates held back for confirmation; nothing if the user backed out.
  */
-export async function addPapers(): Promise<unknown[]> {
+export async function addPapers(): Promise<AddPapersResult> {
   const { nativePickers } = await hostInfo()
   if (nativePickers) return window.api.library.addPapers()
   const staged = await uploadPdfs()
-  if (!staged?.length) return []
+  if (!staged?.length) return { added: [], duplicates: null }
   return window.api.library.addPapers(staged)
 }

@@ -24,7 +24,7 @@ export interface Transport {
   on(channel: string, listener: (...args: any[]) => void): () => void
 }
 
-import type { UpdatePaperResult } from '../main/library'
+import type { ResolvedPaper, UpdatePaperResult } from '../main/library'
 import type { ExtractedMeta } from '../main/metadata'
 import type { GitStatus, GitSyncResult } from '../main/git'
 import type { PaperText } from '../main/paperText'
@@ -32,7 +32,7 @@ import type { SemanticResult } from '../main/paperSearch'
 import type { ReviewState } from '../main/checkpoints'
 import type { ApiKeyState } from '../main/writingRules'
 import type { RewriteRequest, RewriteResult } from '../main/rewrite'
-import type { HostInfo } from '../main/core'
+import type { AddPapersResult, HostInfo } from '../main/core'
 import type { ClaudeCliStatus, ClaudeCliTest } from '../main/claudeCli'
 
 /** One level of the backend's filesystem, for the browser folder picker. */
@@ -110,7 +110,12 @@ export function createApi(t: Transport) {
       pdf: (id: string): Promise<Uint8Array | null> => t.invoke('library:pdf', id),
       // `staged` is absolute paths the renderer already put on disk (server mode
       // uploads them first); the desktop app raises its native dialog instead.
-      addPapers: (staged: string[] | null = null) => t.invoke('library:addPapers', staged),
+      // Look-alikes of papers already in the library come back in `duplicates`
+      // un-added; answer with resolveDuplicates (indices to add, [] to skip).
+      addPapers: (staged: string[] | null = null): Promise<AddPapersResult> =>
+        t.invoke('library:addPapers', staged),
+      resolveDuplicates: (token: string, accept: number[]): Promise<ResolvedPaper[]> =>
+        t.invoke('library:resolveDuplicates', { token, accept }),
       updatePaper: (id: string, patch: unknown): Promise<UpdatePaperResult> =>
         t.invoke('library:updatePaper', { id, patch }),
       refetchPaper: (id: string): Promise<void> => t.invoke('library:refetchPaper', id),

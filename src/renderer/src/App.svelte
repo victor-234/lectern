@@ -13,6 +13,7 @@
   import WritingRules from './lib/WritingRules.svelte'
   import ClaudeSetup from './lib/ClaudeSetup.svelte'
   import BulkRename from './lib/BulkRename.svelte'
+  import DuplicatePrompt from './lib/DuplicatePrompt.svelte'
   import ManualRefs from './lib/ManualRefs.svelte'
   import ReviewPanel from './lib/ReviewPanel.svelte'
   import QuickOpen from './lib/QuickOpen.svelte'
@@ -24,6 +25,7 @@
   import type { WorkspaceToolbar } from './lib/QuartoView.svelte'
   import type { ReaderToolbar } from './lib/Reader.svelte'
   import type { ProjectSummary, ResolvedPaper, ProjectPapers, Tag, Group, PaperPatch } from './global'
+  import type { AddPapersResult } from '../../main/core'
 
   type Sort = { key: string; dir: 'asc' | 'desc' }
 
@@ -122,6 +124,8 @@
     })
   )
   let bulkRenameOpen = $state(false) // bulk "rename files to house style" modal
+  // Picked PDFs the backend held back as look-alikes, awaiting "add anyway?".
+  let heldDuplicates = $state<AddPapersResult['duplicates']>(null)
   let manualRefsOpen = $state(false) // project manual-references (extra.bib) modal
   let reviewOpen = $state(false) // checkpoint review of Claude's edits
   // Unreviewed turns, shown on the toolbar chip. Recomputed on project switch
@@ -760,7 +764,14 @@
 
   // ---- mutations -------------------------------------------------------------
   async function addPapers(): Promise<void> {
-    const added = await pickPapers()
+    const { added, duplicates } = await pickPapers()
+    if (added.length) await Promise.all([loadLibrary(), loadProjects()])
+    heldDuplicates = duplicates
+  }
+  async function answerDuplicates(accept: number[]): Promise<void> {
+    if (!heldDuplicates) return
+    const added = await window.api.library.resolveDuplicates(heldDuplicates.token, accept)
+    heldDuplicates = null
     if (added.length) await Promise.all([loadLibrary(), loadProjects()])
   }
   async function attach(p: ResolvedPaper): Promise<void> {
@@ -1454,6 +1465,10 @@
       initialSlug={inquiryOpenSlug}
       onclose={() => { inquiriesOpen = false; inquiryOpenSlug = null }}
     />
+  {/if}
+
+  {#if heldDuplicates}
+    <DuplicatePrompt matches={heldDuplicates.matches} onanswer={answerDuplicates} />
   {/if}
 
   {#if bulkRenameOpen}

@@ -823,6 +823,56 @@ export async function getLibraryPaper(root: string, id: string): Promise<Library
   return reg.papers.find((x) => x.id === id) ?? null
 }
 
+/** A file about to be added that looks like a paper already in the library. */
+export interface DuplicateMatch {
+  /** The incoming file's name. */
+  fileName: string
+  /** What matched: the PDF filename, and/or the citekey the file would get. */
+  reasons: Array<'filename' | 'citekey'>
+  existing: { id: string; citekey: string; title: string; fileName: string }
+}
+
+/**
+ * Which of `filePaths` would duplicate a registered paper — same PDF filename
+ * (case-insensitive) or a filename whose slug equals an existing citekey.
+ * Keyed by the incoming path. A file that already IS a registered `sources/`
+ * entry isn't reported: `addLibraryPapers` skips it anyway.
+ */
+export async function findDuplicates(
+  root: string,
+  filePaths: string[]
+): Promise<Map<string, DuplicateMatch>> {
+  const reg = await readRegistry(root)
+  const out = new Map<string, DuplicateMatch>()
+  const existing = reg.papers.map((p) => {
+    const abs = resolvePaperPath(root, p)
+    return { p, abs, file: basename(abs).toLowerCase(), key: slug(p.citekey) }
+  })
+  for (const fp of filePaths) {
+    if (existing.some((e) => e.abs === fp)) continue
+    const file = basename(fp).toLowerCase()
+    const key = slug(basename(fp).replace(/\.pdf$/i, ''))
+    for (const e of existing) {
+      const reasons: DuplicateMatch['reasons'] = []
+      if (e.file === file) reasons.push('filename')
+      if (e.key === key) reasons.push('citekey')
+      if (!reasons.length) continue
+      out.set(fp, {
+        fileName: basename(fp),
+        reasons,
+        existing: {
+          id: e.p.id,
+          citekey: e.p.citekey,
+          title: e.p.title || e.p.citekey,
+          fileName: basename(e.abs)
+        }
+      })
+      break
+    }
+  }
+  return out
+}
+
 export async function addLibraryPapers(root: string, filePaths: string[]): Promise<ResolvedPaper[]> {
   const reg = await readRegistry(root)
   const added: LibraryPaper[] = []
