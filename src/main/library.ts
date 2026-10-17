@@ -259,6 +259,9 @@ export interface LibraryPaper {
   url?: string
   /** Which extractor filled the metadata; absent means enrichment hasn't run yet. */
   metaSource?: ExtractedMeta['source']
+  /** Which revision of the extraction ladder produced `metaSource` (see
+   *  `ENRICH_VERSION`). Absent on entries from before it was tracked. */
+  metaVersion?: number
   /** Tags (`.lctrn/tags.json`) this paper is wired into. */
   tagIds?: string[]
   /** Epoch ms when the paper was registered; drives the default "last added" sort. */
@@ -907,9 +910,12 @@ export async function updateLibraryPaper(
   // the paper, so stop trying to work it out: stamp the entry as enriched.
   // Without this, `enrichLibrary` still sees an unstamped paper later and runs
   // the whole extraction ladder over it — up to spawning the `claude` CLI — to
-  // re-derive metadata a human already supplied. Only ever stamps a paper that
-  // has never been enriched, so a real crossref/embedded provenance is kept.
-  if (!p.metaSource && p.title && p.authors?.length && p.year) {
+  // re-derive metadata a human already supplied. Only replaces a weak
+  // (embedded/filename) or missing provenance, so a real crossref one is kept.
+  const editedBiblio =
+    patch.title !== undefined || patch.authors !== undefined || patch.year !== undefined
+  const weak = !p.metaSource || !TRUSTED_SOURCES.has(p.metaSource)
+  if (weak && (editedBiblio || !p.metaSource) && p.title && p.authors?.length && p.year) {
     p.metaSource = 'imported'
   }
   if (patch.citekey !== undefined) {
@@ -994,6 +1000,8 @@ export async function previewHouseRenames(root: string): Promise<RenamePreviewIt
   const [reg, abbrevs] = await Promise.all([readRegistry(root), readJournalAbbrevs(root)])
   const out: RenamePreviewItem[] = []
   for (const p of reg.papers) {
+    // Same bar as the automatic rename: don't propose names built from guesses.
+    if (!p.metaSource || !TRUSTED_SOURCES.has(p.metaSource)) continue
     const abs = resolvePaperPath(root, p)
     if (!isInsideSources(root, abs)) continue
     try {
@@ -1167,8 +1175,28 @@ async function syncLibraryLocked(root: string): Promise<boolean> {
 /** Roots with an enrichment pass in flight, so concurrent calls don't double-process. */
 const enriching = new Set<string>()
 
+/**
+ * Bump when the extraction ladder gets meaningfully better, so papers that
+ * previously came away with only weak metadata get one more attempt. v2: the
+ * `claude` CLI is resolved through a login shell (a Finder-launched app never
+ * found it before) and junk embedded PDF info is filtered.
+ */
+const ENRICH_VERSION = 2
+
+/** Provenance good enough to name a file after. Embedded PDF info and the
+ *  filename itself are guesses — renaming on them just launders the guess into
+ *  something that looks authoritative ("1987, PII 0361 3682.pdf"). */
+const TRUSTED_SOURCES: ReadonlySet<ExtractedMeta['source']> = new Set([
+  'crossref',
+  'claude',
+  'pages',
+  'imported'
+])
+
 function needsEnrichment(p: LibraryPaper): boolean {
-  return !p.metaSource
+  if (!p.metaSource) return true
+  // Weak results from an older ladder get one retry; strong ones never re-run.
+  return !TRUSTED_SOURCES.has(p.metaSource) && (p.metaVersion ?? 1) < ENRICH_VERSION
 }
 
 /**
@@ -1199,22 +1227,34 @@ export async function enrichLibrary(root: string, onProgress?: () => void): Prom
       const applied = await withRegistryLock(root, async () => {
         const reg = await readRegistry(root)
         const target = reg.papers.find((p) => p.id === next.id)
-        if (!target) return false
-        if (!needsEnrichment(target)) return false // someone else enriched it
-        applyMeta(reg, target, meta)
+        if (!target) return null
+        if (!needsEnrichment(target)) return null // someone else enriched it
+        const retry = !!target.metaSource
+        const oldKey = target.citekey
+        // A retry that again finds nothing must not clobber what's there with the
+        // filename-derived placeholder — just record that this ladder ran.
+        if (retry && meta.source === 'filename') target.metaVersion = ENRICH_VERSION
+        else applyMeta(reg, target, meta)
         await writeRegistry(root, reg)
         await regenerateMasterBib(root)
-        return true
+        return { retry, oldKey, newKey: target.citekey, source: target.metaSource }
       })
       if (!applied) continue
+      // A retried paper may already be cited under its old key.
+      if (applied.retry && applied.newKey !== applied.oldKey) {
+        await renameCitekeyEverywhere(root, applied.oldKey, applied.newKey).catch(() => {})
+      }
       // Now that we have real metadata, put the on-disk file into house style
-      // (e.g. "Wagner et al. 2024 JFE, Corp governance.pdf"). Best-effort: a
-      // paper too sparse to name, already in style, or outside sources/ just
-      // keeps its filename, and a rename hiccup never derails enrichment.
-      try {
-        await renamePaperToHouseStyle(root, next.id)
-      } catch {
-        // leave the filename as-is — the metadata itself was saved above
+      // (e.g. "Wagner et al. 2024 JFE, Corp governance.pdf"). Only on trusted
+      // metadata: a name built from a PDF's producer stamp or from the filename
+      // itself is worse than the name the file arrived with. Best-effort: a
+      // rename hiccup never derails enrichment.
+      if (applied.source && TRUSTED_SOURCES.has(applied.source)) {
+        try {
+          await renamePaperToHouseStyle(root, next.id)
+        } catch {
+          // leave the filename as-is — the metadata itself was saved above
+        }
       }
       onProgress?.()
     }
@@ -1249,6 +1289,7 @@ function applyMeta(reg: Registry, p: LibraryPaper, m: ExtractedMeta, overwrite =
   p.pages = keep(m.pages, p.pages)
   p.url = keep(m.url, p.url)
   p.metaSource = m.source
+  p.metaVersion = ENRICH_VERSION
   // Promote the filename-slug citekey to author+year when we learned both.
   const surname = surnameOf(p.authors[0])
   if (surname && p.year) {

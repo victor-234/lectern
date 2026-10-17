@@ -105,12 +105,48 @@ async function readPdf(absPath: string): Promise<{ text: string; info: Record<st
 }
 
 function fromEmbedded(info: Record<string, unknown>): Partial<ExtractedMeta> {
-  const title = str(info.Title)
-  const author = str(info.Author)
+  const title = embeddedTitle(str(info.Title))
+  const authors = splitAuthors(str(info.Author)).filter(plausibleAuthor)
   return {
-    title: title || undefined,
-    authors: author ? splitAuthors(author) : undefined
+    title,
+    authors: authors.length ? authors : undefined
   }
+}
+
+/**
+ * The PDF Info dictionary is written by whatever tool produced the file, not by
+ * the paper's authors, and is frequently junk: Elsevier stamps "PII:
+ * 0361-3682(87)90013-4", Word exports "Microsoft Word - draft.docx", layout tools
+ * leave "QUK-Pages 47-70.qxd". Taken at face value these became titles — and then
+ * house-style filenames. Keep a title only when it reads like one.
+ */
+function embeddedTitle(raw: string): string | undefined {
+  const officeExport = /^Microsoft\s+\w+\s*-\s*/i.test(raw)
+  const fileExt = /\.(docx?|rtf|odt|pages|tex|qxd|indd|pdf|ps|dvi)$/i
+  // A bare filename ("QUK-Pages 47-70.qxd") is the layout job, not the paper.
+  // Office exports wrap the document's own name, which is sometimes the title.
+  if (fileExt.test(raw) && !officeExport) return undefined
+  const t = raw
+    .replace(/^Microsoft\s+\w+\s*-\s*/i, '')
+    .replace(fileExt, '')
+    .trim()
+  if (!t) return undefined
+  if (/^PII\b|^doi\b|^untitled\b/i.test(t)) return undefined
+  // A real title has at least two proper words; "2026-06-28 draft v12" doesn't.
+  const words = t.match(/\p{L}{3,}/gu) ?? []
+  if (words.length < 2) return undefined
+  // Mostly digits/punctuation → an identifier, not a title.
+  const letters = (t.match(/\p{L}/gu) ?? []).length
+  if (letters / t.length < 0.5) return undefined
+  return t
+}
+
+/** An embedded Author is often the OS account ("blankbe", "Mac 2", "Admin"). */
+function plausibleAuthor(name: string): boolean {
+  if (/\d/.test(name)) return false
+  if (/^(admin(istrator)?|user|owner|author|unknown|microsoft.*)$/i.test(name.trim())) return false
+  // Need a first AND last name — a single token is a login, not a citation.
+  return (name.match(/\p{L}{2,}/gu) ?? []).length >= 2
 }
 
 /**
@@ -378,6 +414,11 @@ If a field is not visible on these pages use null (or [] for authors). Do not in
  * Run `claude -p --output-format json`, feeding the prompt on stdin; return the
  * model's text. Shared with the Reader's semantic paper search, which sends a
  * whole paper and so wants a longer leash than metadata extraction.
+ *
+ * Goes through a login shell, like pty.ts and claudeCli.ts: an app launched
+ * from Finder inherits a bare PATH (/usr/bin:/bin:…), so a plain
+ * `execFile('claude')` misses a Homebrew or ~/.local install and every call
+ * silently returns null.
  */
 export function runClaude(
   prompt: string,
@@ -385,8 +426,8 @@ export function runClaude(
 ): Promise<string | null> {
   return new Promise((resolve) => {
     const child = execFile(
-      'claude',
-      ['-p', '--output-format', 'json'],
+      process.env.SHELL || '/bin/zsh',
+      ['-lc', 'claude -p --output-format json'],
       { timeout: opts.timeoutMs ?? 90_000, maxBuffer: 8 * 1024 * 1024 },
       (err, stdout) => {
         if (err || !stdout) return resolve(null)

@@ -315,51 +315,67 @@
     <div class="insp-empty">Select a paper to inspect its metadata, abstract, and analyses.</div>
   {:else}
     <div class="insp-head">
-      <div class="insp-actions">
-        {#if onread && paper.exists && !editing}
-          <button class="iconbtn" title="Open PDF in Reader" onclick={() => onread(paper)}><Icon n="pdf" /></button>
-        {/if}
-        {#if onreading && !editing}
-          <button
-            class="iconbtn"
-            class:iconbtn--on={!!paper.readingAt}
-            title={paper.readingAt ? 'Remove from reading list' : 'Add to reading list'}
-            onclick={() => onreading(paper, !paper.readingAt)}
-          ><Icon n="bookmark" /></button>
-        {/if}
-        {#if onrefetch && paper.exists && !editing}
-          <button
-            class="iconbtn"
-            class:spin={refetching}
-            title="Re-fetch metadata from DOI/Crossref + PDF (overwrites all fields)"
-            disabled={refetching}
-            onclick={refetch}
-          ><Icon n="refresh" /></button>
-        {/if}
-        {#if onrename && paper.exists && !editing}
-          <button
-            class="iconbtn"
-            disabled={!canRename || renaming}
-            title={canRename
-              ? `Rename file to house style:\n${proposedName}`
-              : proposedName
-                ? 'Filename already matches the house style'
-                : 'Not enough metadata to build a filename'}
-            onclick={rename}
-          ><Icon n="rename" /></button>
-        {/if}
-        {#if onsave && !editing}
-          <button class="iconbtn" title="Edit metadata" onclick={startEdit}><Icon n="pen" /></button>
-        {/if}
-        {#if ondelete && !editing}
-          <button
-            class="iconbtn iconbtn--danger"
-            disabled={removing}
-            title="Remove from library"
-            onclick={remove}
-          ><Icon n="trash" /></button>
-        {/if}
-      </div>
+      {#if !editing}
+        <div class="insp-actions">
+          {#if onread && paper.exists}
+            <button
+              class="iconbtn"
+              data-tip="Open PDF in Reader"
+              aria-label="Open PDF in Reader"
+              onclick={() => onread(paper)}
+            ><Icon n="pdf" /></button>
+          {/if}
+          {#if onreading}
+            <button
+              class="iconbtn"
+              class:iconbtn--on={!!paper.readingAt}
+              data-tip={paper.readingAt ? 'Remove from reading list' : 'Add to reading list'}
+              aria-label={paper.readingAt ? 'Remove from reading list' : 'Add to reading list'}
+              onclick={() => onreading(paper, !paper.readingAt)}
+            ><Icon n="bookmark" /></button>
+          {/if}
+          {#if onrefetch && paper.exists}
+            <button
+              class="iconbtn"
+              class:spin={refetching}
+              data-tip="Re-fetch metadata&#10;(overwrites all fields)"
+              aria-label="Re-fetch metadata from DOI/Crossref + PDF (overwrites all fields)"
+              disabled={refetching}
+              onclick={refetch}
+            ><Icon n="refresh" /></button>
+          {/if}
+          {#if onrename && paper.exists}
+            <button
+              class="iconbtn"
+              disabled={!canRename || renaming}
+              data-tip={canRename
+                ? `Rename to house style:\n${proposedName}`
+                : proposedName
+                  ? 'Filename already matches\nthe house style'
+                  : 'Not enough metadata\nto build a filename'}
+              aria-label="Rename file to house style"
+              onclick={rename}
+            ><Icon n="rename" /></button>
+          {/if}
+          {#if onsave}
+            <button
+              class="iconbtn"
+              data-tip="Edit metadata"
+              aria-label="Edit metadata"
+              onclick={startEdit}
+            ><Icon n="pen" /></button>
+          {/if}
+          {#if ondelete}
+            <button
+              class="iconbtn iconbtn--danger"
+              disabled={removing}
+              data-tip="Remove from library"
+              aria-label="Remove from library"
+              onclick={remove}
+            ><Icon n="trash" /></button>
+          {/if}
+        </div>
+      {/if}
       <h3 class="insp-title">{paper.title || paper.citekey}</h3>
       <div class="insp-authors">{authorList}</div>
     </div>
@@ -524,20 +540,65 @@
 </aside>
 
 <style>
-  /* Action buttons sit on their own row above the title, so the title
-     always gets the full inspector width instead of wrapping beside them. */
   .insp-actions {
     display: flex;
     flex-wrap: wrap;
-    justify-content: flex-end;
+    align-items: center;
     gap: 2px;
-    margin: -4px -6px 0 0;
-  }
-  .insp-actions:empty {
-    display: none;
+    margin: -4px 0 8px -6px;
   }
   .insp-actions .iconbtn {
     flex: none;
+  }
+
+  /* Custom hover tooltip — native `title` is omitted so only one shows. */
+  .insp-actions .iconbtn::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 5px);
+    left: 50%;
+    z-index: 20;
+    max-width: 190px;
+    width: max-content;
+    padding: 5px 8px;
+    border-radius: var(--r-xs);
+    background: var(--text);
+    color: var(--surface);
+    font-family: var(--font-sans);
+    font-size: 11px;
+    line-height: 1.35;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, -3px);
+    transition:
+      opacity var(--dur-fast),
+      transform var(--dur-fast);
+  }
+  .insp-actions .iconbtn:hover::after,
+  .insp-actions .iconbtn:focus-visible::after {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  /* Keep the tooltips of the outermost buttons inside the panel. */
+  .insp-actions .iconbtn:first-child::after {
+    left: 0;
+    transform: translate(0, -3px);
+  }
+  .insp-actions .iconbtn:first-child:hover::after,
+  .insp-actions .iconbtn:first-child:focus-visible::after {
+    transform: translate(0, 0);
+  }
+  .insp-actions .iconbtn:last-child::after {
+    left: auto;
+    right: 0;
+    transform: translate(0, -3px);
+  }
+  .insp-actions .iconbtn:last-child:hover::after,
+  .insp-actions .iconbtn:last-child:focus-visible::after {
+    transform: translate(0, 0);
   }
   .frm {
     display: flex;
