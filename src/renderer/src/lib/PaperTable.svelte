@@ -130,7 +130,7 @@
     }
   }
 
-  // Dragging a row carries paper ids so the sidebar can file them onto a tag or
+  // Dragging a row carries paper ids so the view menu can file them onto a tag or
   // the reading list. Dragging a row that's part of the selection takes the whole
   // selection; dragging an unselected row selects it first, so what you see
   // highlighted is always what you're dragging.
@@ -175,7 +175,8 @@
   // ---- Resizable columns ----
   // One width per column, in table order: title, authors, journal, year,
   // citekey, added, state. Drag a header's right edge to resize; widths
-  // persist to localStorage so they survive reloads.
+  // persist to localStorage so they survive reloads. The title column's width
+  // is a minimum: it absorbs whatever room the pane has beyond the sum.
   const DEFAULT_W = [300, 190, 150, 64, 150, 120, 110]
   const MIN_W = 48
   const STORAGE_KEY = 'lctrn.paperColWidths'
@@ -197,7 +198,9 @@
     e.preventDefault()
     e.stopPropagation() // don't trigger column sort
     const startX = e.clientX
-    const startW = colW[i]
+    // Measure, don't trust colW: the title column may be rendering wider.
+    const th = (e.currentTarget as HTMLElement).parentElement
+    const startW = th?.getBoundingClientRect().width ?? colW[i]
     const onMove = (ev: PointerEvent): void => {
       colW[i] = Math.max(MIN_W, startW + (ev.clientX - startX))
     }
@@ -230,9 +233,9 @@
   {#if papers.length === 0}
     <div class="tableempty">{emptyText}</div>
   {:else}
-    <table class="dt" style="table-layout: fixed; width: {colW.reduce((a, b) => a + b, 0)}px;">
+    <table class="dt" style="table-layout: fixed; width: max(100%, {colW.reduce((a, b) => a + b, 0)}px);">
       <colgroup>
-        {#each colW as w}<col style="width: {w}px" />{/each}
+        {#each colW as w, i}<col style={i === 0 ? '' : `width: ${w}px`} />{/each}
       </colgroup>
       <thead>
         <tr>

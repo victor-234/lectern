@@ -46,7 +46,6 @@
   // plus Reader once a paper's PDF is open — ⌘1–9 also jumps to a Reader tab).
   let mode = $state<'papers' | 'workspace' | 'reader'>('papers')
   let inspectorOn = $state(true)
-  let paperSidebarOn = $state(true)
   // Workspace (QuartoView) panels — left outline, right margin-notes.
   let workspaceOutlineOn = $state(true)
   let workspaceNotesOn = $state(true)
@@ -149,6 +148,7 @@
   const RECENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
   let collapsedGroups = $state<Set<string>>(new Set())
   let tagManagerOpen = $state(false)
+  let viewMenuOpen = $state(false)
   let writingRulesOpen = $state(false)
   // Where you point Lectern at your Claude — see ClaudeSetup.svelte. Opened
   // from the menu, and from the terminal when `claude` isn't installed.
@@ -336,10 +336,9 @@
     if (mode === 'papers') focusSearch()
   }
 
-  // ⌘K: reveal the Papers sidebar (so the input exists) then focus it.
+  // ⌘K: switch to Papers (so the toolbar search exists) then focus it.
   function focusSearch(): void {
     mode = 'papers'
-    paperSidebarOn = true
     requestAnimationFrame(() => {
       searchEl?.focus()
       searchEl?.select()
@@ -456,6 +455,10 @@
     smartView = null
     resetTableState()
   }
+  function pickView(go: () => void): void {
+    viewMenuOpen = false
+    go()
+  }
   // Smart views: recency views scope to the last 30 days and pre-sort by the
   // matching timestamp; "Not tagged" lists papers with no tags (default sort).
   function openSmart(v: 'added' | 'interacted' | 'untagged' | 'reading'): void {
@@ -493,7 +496,7 @@
     await window.api.library.reorderTags(entries)
     await loadLibrary()
   }
-  // --- Drag papers onto a sidebar tag to file them under it -------------------
+  // --- Drag papers onto a tag in the view menu to file them under it ----------
   const PAPER_DND = 'application/x-lctrn-papers'
   let dragOverTagId = $state<string | null>(null)
   function onTagDragOver(e: DragEvent, tagId: string): void {
@@ -501,6 +504,12 @@
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
     dragOverTagId = tagId
+  }
+  // Papers dragged onto the view button spring the menu open to reach the tags.
+  function onViewMenuDragOver(e: DragEvent): void {
+    if (!e.dataTransfer?.types.includes(PAPER_DND)) return
+    e.preventDefault()
+    viewMenuOpen = true
   }
   function onTagDragLeave(tagId: string): void {
     if (dragOverTagId === tagId) dragOverTagId = null
@@ -522,8 +531,8 @@
   }
   // --- Reading list ----------------------------------------------------------
   // A standalone queue of papers to read, kept in the registry (`readingAt`) and
-  // reachable from its own section at the top of the sidebar. Papers join it by
-  // drag-drop onto the section, or from the Inspector's bookmark button.
+  // reachable from the top of the view menu. Papers join it by drag-drop onto
+  // that row, or from the Inspector's bookmark button.
   let dragOverReading = $state(false)
   const readingCount = $derived(libraryPapers.filter((p) => p.readingAt).length)
   function onReadingDragOver(e: DragEvent): void {
@@ -555,7 +564,7 @@
     await loadLibrary()
   }
   // Opening a project is a Workspace action — projects live in the workspace, not
-  // the Papers sidebar. Selecting one drops you into the writing view.
+  // the Papers views. Selecting one drops you into the writing view.
   function openProject(p: ProjectSummary): void {
     selected = p
     void window.api.projects.setLastOpened(p.path)
@@ -644,7 +653,7 @@
     if (!tagFilter) return libraryPapers
     return libraryPapers.filter((p) => p.tagIds?.includes(tagFilter!))
   })
-  // Sidebar badge counts for the smart views (recency windows + untagged).
+  // View-menu badge counts for the smart views (recency windows + untagged).
   const recentCounts = $derived.by(() => {
     const since = Date.now() - RECENT_WINDOW_MS
     let added = 0
@@ -672,7 +681,7 @@
     }
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
   })
-  // Sidebar rows: each standalone group renders as a collapsible header with its
+  // View-menu rows: each standalone group renders as a collapsible header with its
   // member tags indented beneath; ungrouped tags follow at the root. One level deep.
   // A row is either a group header (`group`, no `tag`) or a tag (`tag`).
   type TagRow =
@@ -747,7 +756,6 @@
   // The inspector is paper-specific, so it only opens in Papers mode once a
   // paper is actually selected in the table.
   const showInspector = $derived(inspectorOn && mode === 'papers' && activePaper != null)
-  const showSidebar = $derived(paperSidebarOn && mode === 'papers')
 
   // Papers ⌘/⇧-clicked in the table. Drives the "N selected" toolbar readout;
   // the table itself owns the selection and prunes it when the view changes.
@@ -848,10 +856,9 @@
       if (mode === 'workspace') workspaceNotesOn = !workspaceNotesOn
       else inspectorOn = !inspectorOn
     } else if (mod && e.key.toLowerCase() === 'b') {
-      // ⌘B is the LEFT panel: outline in the Workspace, paper sidebar in Papers.
+      // ⌘B is the LEFT panel: the outline in the Workspace (Papers has none).
       e.preventDefault()
       if (mode === 'workspace') workspaceOutlineOn = !workspaceOutlineOn
-      else paperSidebarOn = !paperSidebarOn
     }
   }
 
@@ -881,7 +888,7 @@
         : 'no project selected'
       : view === 'library'
         ? selectedIds.length > 1
-          ? `${selectedIds.length} selected · drag onto a tag or the reading list`
+          ? `${selectedIds.length} selected · drag onto the view menu to tag or queue`
           : query.trim()
           ? `${filteredPapers.length} of ${currentPapers.length} · “${query.trim()}”`
           : smartView === 'reading'
@@ -1036,10 +1043,99 @@
       {:else if mode === 'papers'}
         <span class="tb-div" aria-hidden="true"></span>
         <div class="tb-heading">
-          <span class="tb-title">{toolbarTitle}</span>
+          <!-- View menu: the library's views (reading list, smart views, tags)
+               behind the title. Dragging papers onto the button
+               springs it open so they can be dropped on a tag or the list. -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="view-switch" ondragover={onViewMenuDragOver}>
+            <button class="view-btn" aria-haspopup="menu" aria-expanded={viewMenuOpen} title="Switch view" onclick={() => (viewMenuOpen = !viewMenuOpen)}>
+              <span class="tb-title">{toolbarTitle}</span>
+              <span class="caret"><Icon n="chevron-down" /></span>
+            </button>
+            {#if viewMenuOpen}
+              <button class="proj-backdrop" aria-label="Close menu" onclick={() => (viewMenuOpen = false)}></button>
+              <div class="proj-menu view-menu" role="menu">
+                <button
+                  class="proj-row"
+                  data-on={view === 'library' && smartView === 'reading'}
+                  data-droptarget={dragOverReading}
+                  title="Papers you queued to read — drag papers here to add them"
+                  onclick={() => pickView(() => openSmart('reading'))}
+                  ondragover={onReadingDragOver}
+                  ondragleave={() => (dragOverReading = false)}
+                  ondrop={(e) => { void onReadingDrop(e); viewMenuOpen = false }}
+                >
+                  <Icon n="bookmark" /><span class="proj-name">Reading List</span><span class="proj-count">{readingCount}</span>
+                </button>
+                <div class="proj-sep"></div>
+                <button class="proj-row" data-on={view === 'library' && !tagFilter && !smartView} title="All Papers (⇧⌘K)" onclick={() => pickView(showLibrary)}>
+                  <Icon n="library" /><span class="proj-name">All Papers</span><span class="proj-count">{libraryPapers.length}</span>
+                </button>
+                <button class="proj-row" data-on={view === 'library' && smartView === 'added'} title="Added in the last 30 days" onclick={() => pickView(() => openSmart('added'))}>
+                  <Icon n="clock" /><span class="proj-name">Recently Added</span><span class="proj-count">{recentCounts.added}</span>
+                </button>
+                <button class="proj-row" data-on={view === 'library' && smartView === 'interacted'} title="Notes or annotations changed in the last 30 days" onclick={() => pickView(() => openSmart('interacted'))}>
+                  <Icon n="pen" /><span class="proj-name">Recently Interacted</span><span class="proj-count">{recentCounts.interacted}</span>
+                </button>
+                <button class="proj-row" data-on={view === 'library' && smartView === 'untagged'} title="Papers with no tags" onclick={() => pickView(() => openSmart('untagged'))}>
+                  <Icon n="filter" /><span class="proj-name">Not tagged</span><span class="proj-count">{recentCounts.untagged}</span>
+                </button>
+                {#if tags.length}
+                  <div class="proj-sep"></div>
+                  {#each orderedTags as row (row.key)}
+                    {#if row.group}
+                      <button
+                        class="proj-row view-grouphead"
+                        aria-expanded={!row.collapsed}
+                        title={row.collapsed ? 'Expand' : 'Collapse'}
+                        onclick={() => toggleGroup(row.group.id)}
+                      >
+                        <span class="view-chev" data-collapsed={row.collapsed}><Icon n="chevron-down" /></span>
+                        <span class="proj-name">{row.group.name}</span>
+                        <span class="proj-count">{row.count}</span>
+                      </button>
+                    {:else}
+                      <button
+                        class="proj-row"
+                        data-on={view === 'library' && tagFilter === row.tag.id}
+                        data-droptarget={dragOverTagId === row.tag.id}
+                        style={row.depth ? 'padding-left: 30px' : ''}
+                        title={row.tag.description}
+                        onclick={() => pickView(() => openTag(row.tag.id))}
+                        ondragover={(e) => onTagDragOver(e, row.tag.id)}
+                        ondragleave={() => onTagDragLeave(row.tag.id)}
+                        ondrop={(e) => { void onTagDrop(e, row.tag.id); viewMenuOpen = false }}
+                      >
+                        <span class="proj-name">{row.tag.name}</span>
+                        <span class="proj-count">{tagCounts.get(row.tag.id) ?? 0}</span>
+                      </button>
+                    {/if}
+                  {/each}
+                  <div class="proj-sep"></div>
+                  <button class="proj-row" onclick={() => { viewMenuOpen = false; tagManagerOpen = true }}>
+                    <Icon n="pen" /><span class="proj-name">Manage tags…</span>
+                  </button>
+                {/if}
+              </div>
+            {/if}
+          </div>
           {#if toolbarSub}<span class="tb-sub">{toolbarSub}</span>{/if}
         </div>
         <span class="tb-spacer"></span>
+        <div class="searchbox tb-search">
+          <Icon n="search" />
+          <input
+            bind:this={searchEl}
+            bind:value={query}
+            placeholder="Search library…"
+            onkeydown={onSearchKey}
+          />
+          {#if query}
+            <button class="search-clear" title="Clear" onclick={() => { query = ''; searchEl?.focus() }}><Icon n="x" /></button>
+          {:else}
+            <span class="kbd">⌘K</span>
+          {/if}
+        </div>
         <button class="btn btn--ghost" title="Talk to your literature — ask a question across selected papers" onclick={() => (inquiriesOpen = true)}>
           <Icon n="terminal" />Inquiries
         </button>
@@ -1181,116 +1277,7 @@
       </div>
     </div>
 
-    <div class="body" data-inspector={showInspector} data-sidebar={showSidebar} data-mode={mode}>
-      <!-- ---- Sidebar (Papers app only — not shown while writing) ---- -->
-      {#if mode === 'papers' && paperSidebarOn}
-      <aside class="sidebar">
-        <div class="sb-search">
-          <div class="searchbox">
-            <Icon n="search" />
-            <input
-              bind:this={searchEl}
-              bind:value={query}
-              placeholder="Search library…"
-              onkeydown={onSearchKey}
-            />
-            {#if query}
-              <button class="search-clear" title="Clear" onclick={() => { query = ''; searchEl?.focus() }}><Icon n="x" /></button>
-            {:else}
-              <span class="kbd">⌘K</span>
-            {/if}
-          </div>
-        </div>
-        <div class="sb-scroll">
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div
-            class="sb-group sb-reading"
-            data-droptarget={dragOverReading}
-            ondragover={onReadingDragOver}
-            ondragleave={() => (dragOverReading = false)}
-            ondrop={onReadingDrop}
-          >
-            <div class="sb-group__label"><span>Reading List</span></div>
-            <button
-              class="sb-item"
-              data-active={view === 'library' && smartView === 'reading'}
-              title="Papers you queued to read — drag papers here to add them"
-              onclick={() => openSmart('reading')}
-            >
-              <span class="sb-ic"><Icon n="bookmark" /></span>
-              <span class="sb-name">To read</span>
-              <span class="sb-count">{readingCount}</span>
-            </button>
-          </div>
-          <div class="sb-group">
-            <div class="sb-group__label"><span>Library</span></div>
-            <button class="sb-item" data-active={view === 'library' && !tagFilter && !smartView} title="All Papers (⇧⌘K)" onclick={showLibrary}>
-              <span class="sb-ic"><Icon n="library" /></span>
-              <span class="sb-name">All Papers</span>
-              <span class="sb-count">{libraryPapers.length}</span>
-            </button>
-            <button class="sb-item" data-active={view === 'library' && smartView === 'added'} title="Added in the last 30 days" onclick={() => openSmart('added')}>
-              <span class="sb-ic"><Icon n="clock" /></span>
-              <span class="sb-name">Recently Added</span>
-              <span class="sb-count">{recentCounts.added}</span>
-            </button>
-            <button class="sb-item" data-active={view === 'library' && smartView === 'interacted'} title="Notes or annotations changed in the last 30 days" onclick={() => openSmart('interacted')}>
-              <span class="sb-ic"><Icon n="pen" /></span>
-              <span class="sb-name">Recently Interacted</span>
-              <span class="sb-count">{recentCounts.interacted}</span>
-            </button>
-            <button class="sb-item" data-active={view === 'library' && smartView === 'untagged'} title="Papers with no tags" onclick={() => openSmart('untagged')}>
-              <span class="sb-ic"><Icon n="filter" /></span>
-              <span class="sb-name">Not tagged</span>
-              <span class="sb-count">{recentCounts.untagged}</span>
-            </button>
-          </div>
-          {#if tags.length}
-            <div class="sb-group">
-              <div class="sb-group__label sb-group__label--row">
-                <span>Tags</span>
-                <button class="sb-edit" title="Manage groups" onclick={() => (tagManagerOpen = true)}>
-                  <Icon n="pen" />
-                </button>
-              </div>
-              {#each orderedTags as row (row.key)}
-                {#if row.group}
-                  <button
-                    class="sb-item sb-grouphead"
-                    data-group="true"
-                    aria-expanded={!row.collapsed}
-                    title={row.collapsed ? 'Expand' : 'Collapse'}
-                    onclick={() => toggleGroup(row.group.id)}
-                  >
-                    <span class="sb-chev" data-collapsed={row.collapsed}>
-                      <Icon n="chevron-down" />
-                    </span>
-                    <span class="sb-name">{row.group.name}</span>
-                    <span class="sb-count">{row.count}</span>
-                  </button>
-                {:else}
-                  <button
-                    class="sb-item"
-                    data-active={view === 'library' && tagFilter === row.tag.id}
-                    data-droptarget={dragOverTagId === row.tag.id}
-                    style={row.depth ? 'padding-left: 28px' : ''}
-                    title={row.tag.description}
-                    onclick={() => openTag(row.tag.id)}
-                    ondragover={(e) => onTagDragOver(e, row.tag.id)}
-                    ondragleave={() => onTagDragLeave(row.tag.id)}
-                    ondrop={(e) => onTagDrop(e, row.tag.id)}
-                  >
-                    <span class="sb-name">{row.tag.name}</span>
-                    <span class="sb-count">{tagCounts.get(row.tag.id) ?? 0}</span>
-                  </button>
-                {/if}
-              {/each}
-            </div>
-          {/if}
-        </div>
-      </aside>
-      {/if}
-
+    <div class="body" data-inspector={showInspector} data-mode={mode}>
       <!-- ---- Center ---- -->
       <main class="center">
         <!-- The stage is a row: the app views on the left, the Reader on the
@@ -1512,68 +1499,60 @@
 {/if}
 
 <style>
-  /* Tags sidebar group: header row with an edit affordance, grouped rows. */
-  .sb-group__label--row {
+  /* Papers view menu (reading list, smart views, tags) under the toolbar title. */
+  .view-switch {
+    position: relative;
+    flex: none;
+  }
+  .view-btn {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-  }
-  .sb-edit {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    gap: 4px;
     background: transparent;
     border: none;
-    padding: 2px;
+    padding: 3px 6px;
+    margin-left: -6px;
     border-radius: var(--r-xs);
-    color: var(--text-faint);
     cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.12s ease;
   }
-  .sb-group:hover .sb-edit {
-    opacity: 1;
-  }
-  .sb-edit:hover {
-    color: var(--text);
+  .view-btn:hover {
     background: var(--surface-inset);
   }
-  .sb-edit :global(svg) {
+  .view-btn .caret {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-faint);
+  }
+  .view-btn .caret :global(svg) {
     width: 12px;
     height: 12px;
   }
-  .sb-item[data-group='true'] .sb-name {
-    font-weight: 600;
-    color: var(--text-secondary);
+  .view-menu {
+    min-width: 260px;
+    max-height: min(70vh, 640px);
   }
-  /* Group headers collapse/expand their tags; they don't filter papers. */
-  .sb-grouphead {
-    margin-top: 4px;
-  }
-  .sb-chev {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-faint);
-    transition: transform var(--dur-fast, 0.12s) ease;
-  }
-  .sb-chev[data-collapsed='true'] {
-    transform: rotate(-90deg);
-  }
-  .sb-chev :global(svg) {
-    width: 13px;
-    height: 13px;
-  }
-
-  /* Reading list: its own queue at the top of the sidebar; papers land on it by
-     drag-drop, so the whole section highlights as a drop target. */
-  .sb-reading {
-    margin-top: 4px;
-  }
-  .sb-reading[data-droptarget='true'] {
+  .view-menu .proj-row[data-droptarget='true'] {
     background: var(--accent-weak);
+    color: var(--text);
     box-shadow: inset 2px 0 0 var(--accent);
   }
+  /* Group headers collapse/expand their tags; they don't filter papers. */
+  .view-grouphead .proj-name {
+    font-weight: 600;
+  }
+  .view-chev {
+    display: inline-flex;
+    transition: transform var(--dur-fast, 0.12s) ease;
+  }
+  .view-chev[data-collapsed='true'] {
+    transform: rotate(-90deg);
+  }
+  .tb-search {
+    flex: 0 1 260px;
+    min-width: 140px;
+    margin-right: 6px;
+  }
+
   /* Trailing chevron on a top-bar menu button (Reader ▸ Prompt). */
   .tb-caret {
     margin-left: 2px;

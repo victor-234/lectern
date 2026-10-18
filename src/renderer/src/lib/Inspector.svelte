@@ -33,7 +33,7 @@
     onwrite: () => void
     /** Open this paper's PDF in the Reader. */
     onread?: (p: ResolvedPaper) => void
-    /** Put this paper on the sidebar reading list, or take it off. */
+    /** Put this paper on the reading list, or take it off. */
     onreading?: (p: ResolvedPaper, on: boolean) => Promise<void>
     onsave?: (id: string, patch: PaperPatch) => Promise<UpdatePaperResult | void>
     /** Re-run extraction and overwrite this paper's metadata from its PDF. */
