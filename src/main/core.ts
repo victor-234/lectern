@@ -88,6 +88,7 @@ import { registerExtraRefs } from './extraRefs'
 import { registerGit } from './git'
 import { registerCheckpoints, ensureCheckpointHooks } from './checkpoints'
 import { registerClaudeCli } from './claudeCli'
+import { registerFactory } from './factory'
 import { startBridge } from './bridge'
 
 export interface CoreDeps {
@@ -461,6 +462,9 @@ export function registerCore(
   registerCheckpoints(ipc, getWindow)
   // Is Claude Code installed and logged in? Asked by the setup panel.
   registerClaudeCli(ipc)
+  // The research factory: headless agents running idea → literature → empirics
+  // → convene → editor, with gates for your feedback.
+  const factory = registerFactory(ipc, getWindow, getLibraryRoot)
 
   // The loopback endpoint Claude Code's hooks report turn boundaries to. Best
   // effort: without it edits still happen, they just aren't grouped by prompt.
@@ -476,7 +480,13 @@ export function registerCore(
     if (root) void watchLibrarySources(root, getWindow)
   })
 
-  return { killPtys: killAll, stop: () => stopBridge() }
+  return {
+    killPtys: killAll,
+    stop: () => {
+      stopBridge()
+      factory.killAll()
+    }
+  }
 }
 
 /** Push an event at the renderer, tolerating a host that is tearing down. */

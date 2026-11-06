@@ -76,6 +76,7 @@ function buildMenu(): void {
         { label: 'Papers', accelerator: 'Control+1', click: () => go('app:papers') },
         { label: 'Reader', accelerator: 'Control+2', click: () => go('app:reader') },
         { label: 'Workspace', accelerator: 'Control+3', click: () => go('app:workspace') },
+        { label: 'Factory', accelerator: 'Control+4', click: () => go('app:factory') },
         { label: 'Next App', accelerator: 'Control+Tab', click: () => go('app:next') },
         { type: 'separator' as const },
         { label: 'Open Paper…', accelerator: 'CmdOrCtrl+O', click: () => go('open') },

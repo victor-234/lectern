@@ -8,6 +8,7 @@
   import QuartoView from './lib/QuartoView.svelte'
   import GitPanel from './lib/GitPanel.svelte'
   import Inquiries from './lib/Inquiries.svelte'
+  import Factory from './lib/Factory.svelte'
   import Reader from './lib/Reader.svelte'
   import TagManager from './lib/TagManager.svelte'
   import WritingRules from './lib/WritingRules.svelte'
@@ -44,7 +45,7 @@
   let view = $state<'library' | 'project'>('library')
   // Top-level modes. ⌃Tab cycles through the visible "apps" (Papers / Workspace,
   // plus Reader once a paper's PDF is open — ⌘1–9 also jumps to a Reader tab).
-  let mode = $state<'papers' | 'workspace' | 'reader'>('papers')
+  let mode = $state<'papers' | 'workspace' | 'reader' | 'factory'>('papers')
   let inspectorOn = $state(true)
   // Workspace (QuartoView) panels — left outline, right margin-notes.
   let workspaceOutlineOn = $state(true)
@@ -54,6 +55,9 @@
   // and zoom (see .view.hidden) instead of re-rendering from scratch each time.
   let readerMounted = $state(false)
   let workspaceMounted = $state(false)
+  let factoryMounted = $state(false)
+  // Factory runs waiting at a gate — badged on the app switcher.
+  let factoryWaiting = $state(0)
   // ---- reader dock ----------------------------------------------------------
   // The Reader can sit beside the Workspace/Papers instead of replacing them —
   // a paper open next to what you're writing. It is the SAME component instance
@@ -109,6 +113,7 @@
   $effect(() => {
     if (mode === 'reader' || docked) readerMounted = true
     if (mode === 'workspace') workspaceMounted = true
+    if (mode === 'factory') factoryMounted = true
   })
   let termOpen = $state(true)
   let onboarding = $state(false)
@@ -281,6 +286,7 @@
     if (action === 'app:papers') setMode('papers')
     else if (action === 'app:workspace') setMode('workspace')
     else if (action === 'app:reader') setMode('reader')
+    else if (action === 'app:factory') setMode('factory')
     else if (action === 'app:next') toggleMode()
     else if (action === 'open') quickOpen = true
     else if (action === 'library') showLibrary()
@@ -575,8 +581,10 @@
   }
 
   // ---- mode switching (⌃Tab) -------------------------------------------------
-  function setMode(m: 'papers' | 'workspace' | 'reader'): void {
-    if (m === 'reader') {
+  function setMode(m: 'papers' | 'workspace' | 'reader' | 'factory'): void {
+    if (m === 'factory') {
+      mode = 'factory'
+    } else if (m === 'reader') {
       if (readerTabs.length) mode = 'reader'
     } else if (m === 'workspace') {
       // Workspace is per-project — adopt the first project if none is open.
@@ -590,9 +598,9 @@
   // ⌃Tab cycles through the visible app buttons in order. Reader only joins the
   // rotation when it's present as the middle button (i.e. some tab is open).
   function toggleMode(): void {
-    const order: Array<'papers' | 'workspace' | 'reader'> = readerTabs.length
-      ? ['papers', 'reader', 'workspace']
-      : ['papers', 'workspace']
+    const order: Array<'papers' | 'workspace' | 'reader' | 'factory'> = readerTabs.length
+      ? ['papers', 'reader', 'workspace', 'factory']
+      : ['papers', 'workspace', 'factory']
     const i = order.indexOf(mode)
     setMode(order[(i + 1) % order.length])
   }
@@ -950,12 +958,13 @@
       <span class="tb-div" aria-hidden="true"></span>
 
       <!-- App switcher (⌃Tab) -->
-      <div class="tb-seg tb-seg--text" title="Switch app (⌃Tab, or ⌃1–3)">
+      <div class="tb-seg tb-seg--text" title="Switch app (⌃Tab, or ⌃1–4)">
         <button data-on={mode === 'papers'} title="Papers (⌃1)" onclick={() => setMode('papers')}>Papers</button>
         {#if readerTabs.length}
           <button data-on={mode === 'reader'} title="Reader (⌃2) · jump to a tab with ⌘1–9" onclick={() => setMode('reader')}>Reader</button>
         {/if}
         <button data-on={mode === 'workspace'} title="Workspace (⌃3)" onclick={() => setMode('workspace')}>Workspace</button>
+        <button data-on={mode === 'factory'} title={factoryWaiting ? `Factory (⌃4) — ${factoryWaiting} waiting for you` : 'Factory (⌃4)'} onclick={() => setMode('factory')}>Factory{#if factoryWaiting}<span class="tb-count">{factoryWaiting}</span>{/if}</button>
       </div>
 
       <!-- Contextual zone — depends on the active app -->
@@ -1310,6 +1319,12 @@
                 <button class="btn btn--primary" onclick={() => (onboarding = true)}><Icon n="plus" />New project</button>
               </div>
             {/if}
+          {/if}
+        </div>
+
+        <div class="view" class:hidden={mode !== 'factory'}>
+          {#if factoryMounted}
+            <Factory onwaiting={(n) => (factoryWaiting = n)} />
           {/if}
         </div>
 

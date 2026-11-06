@@ -34,6 +34,22 @@ import type {
   InquiryDetail,
   CreatedInquiry
 } from '../../main/inquiries'
+import type {
+  FactoryConfig,
+  StageConfig,
+  FactoryRun,
+  FactorySummary,
+  FactoryDetail,
+  FactoryEvent,
+  AgentRef,
+  AgentState,
+  StageState,
+  StageId,
+  Verdict,
+  DatasetInfo,
+  PaperLink,
+  PaperDefaults
+} from '../../main/factory'
 
 declare global {
   interface Window {
@@ -42,6 +58,20 @@ declare global {
 }
 
 export type {
+  FactoryConfig,
+  StageConfig,
+  FactoryRun,
+  FactorySummary,
+  FactoryDetail,
+  FactoryEvent,
+  AgentRef,
+  AgentState,
+  StageState,
+  StageId,
+  Verdict,
+  DatasetInfo,
+  PaperLink,
+  PaperDefaults,
   ResolvedPaper,
   ProjectSummary,
   ProjectPapers,

@@ -34,6 +34,17 @@ import type { ApiKeyState } from '../main/writingRules'
 import type { RewriteRequest, RewriteResult } from '../main/rewrite'
 import type { AddPapersResult, HostInfo } from '../main/core'
 import type { ClaudeCliStatus, ClaudeCliTest } from '../main/claudeCli'
+import type {
+  FactoryConfig,
+  FactoryRun,
+  FactorySummary,
+  FactoryDetail,
+  FactoryEvent,
+  AgentRef,
+  StageId,
+  DatasetInfo,
+  PaperDefaults
+} from '../main/factory'
 
 /** One level of the backend's filesystem, for the browser folder picker. */
 export interface DirListing {
@@ -352,6 +363,53 @@ export function createApi(t: Transport) {
       onChanged: (cb: () => void): (() => void) => {
         return t.on('inquiries:changed', () => cb())
       }
+    },
+    // The research factory: a run is a folder under the library, worked through
+    // by headless Claude agents stage by stage, stopping at gates for you.
+    factory: {
+      list: (): Promise<FactorySummary[]> => t.invoke('factory:list'),
+      read: (slug: string): Promise<FactoryDetail | null> => t.invoke('factory:read', slug),
+      create: (args: { title: string; idea: string; config: FactoryConfig }): Promise<FactoryRun> =>
+        t.invoke('factory:create', args),
+      update: (args: { slug: string; title?: string; idea?: string; config?: FactoryConfig }): Promise<FactoryRun | null> =>
+        t.invoke('factory:update', args),
+      delete: (slug: string): Promise<void> => t.invoke('factory:delete', slug),
+      start: (slug: string): Promise<void> => t.invoke('factory:start', slug),
+      // Gate decisions.
+      approve: (slug: string, note?: string): Promise<void> => t.invoke('factory:approve', { slug, note }),
+      sendBack: (slug: string, to: StageId, note: string): Promise<void> =>
+        t.invoke('factory:sendBack', { slug, to, note }),
+      accept: (slug: string): Promise<void> => t.invoke('factory:accept', slug),
+      kill: (slug: string): Promise<void> => t.invoke('factory:kill', slug),
+      retry: (slug: string): Promise<void> => t.invoke('factory:retry', slug),
+      stopAgent: (ref: AgentRef): Promise<void> => t.invoke('factory:stopAgent', ref),
+      events: (ref: AgentRef): Promise<FactoryEvent[]> => t.invoke('factory:events', ref),
+      output: {
+        get: (ref: AgentRef): Promise<string | null> => t.invoke('factory:output:get', ref),
+        save: (ref: AgentRef, content: string): Promise<void> =>
+          t.invoke('factory:output:save', { ref, content })
+      },
+      feedback: (slug: string, stage: StageId, round: number): Promise<string | null> =>
+        t.invoke('factory:feedback', { slug, stage, round }),
+      // The shell command (and folder) that reopens an agent as an interactive session.
+      resume: (ref: AgentRef): Promise<{ cwd: string; cmd: string } | null> =>
+        t.invoke('factory:resume', ref),
+      openDir: (slug: string): Promise<string> => t.invoke('factory:openDir', slug),
+      template: {
+        get: (): Promise<FactoryConfig> => t.invoke('factory:template:get'),
+        save: (config: FactoryConfig): Promise<void> => t.invoke('factory:template:save', config)
+      },
+      datasets: (): Promise<DatasetInfo[]> => t.invoke('factory:datasets'),
+      // What a run linked to this project should start from (remembered repo, literature files).
+      paperDefaults: (projectPath: string): Promise<PaperDefaults> => t.invoke('factory:paper:defaults', projectPath),
+      // Register a hand-collected dataset: creates datasets/<name>/ with a README to fill in.
+      createDataset: (name: string, description: string): Promise<string> =>
+        t.invoke('factory:datasets:create', { name, description }),
+      openDatasets: (name: string | null = null): Promise<string> => t.invoke('factory:datasets:open', name),
+      onChanged: (cb: (slug: string) => void): (() => void) =>
+        t.on('factory:changed', (slug: string) => cb(slug)),
+      onEvent: (cb: (msg: AgentRef & { event: FactoryEvent }) => void): (() => void) =>
+        t.on('factory:event', (msg: AgentRef & { event: FactoryEvent }) => cb(msg))
     }
   }
 

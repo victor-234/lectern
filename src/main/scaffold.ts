@@ -2,6 +2,7 @@ import { promises as fs } from 'fs'
 import { join } from 'path'
 import { LEARNED_EDITS_FILE, learnedEditsStarter, learnEditsSkill } from './revising'
 import { addressNotesSkill } from './notes'
+import { introCheckSkill, introCheckGuide } from './introCheck'
 
 export interface ProjectMeta {
   title: string
@@ -20,7 +21,8 @@ const FOLDERS = [
   '.claude',
   '.claude/skills/revise-section',
   '.claude/skills/learn-edits',
-  '.claude/skills/address-notes'
+  '.claude/skills/address-notes',
+  '.claude/skills/intro-check'
 ]
 
 /**
@@ -53,6 +55,8 @@ export async function scaffoldProject(
     '.claude/skills/revise-section/SKILL.md': reviseSectionSkill(),
     '.claude/skills/learn-edits/SKILL.md': learnEditsSkill(),
     '.claude/skills/address-notes/SKILL.md': addressNotesSkill(),
+    '.claude/skills/intro-check/SKILL.md': introCheckSkill(),
+    '.claude/skills/intro-check/GUIDE.md': introCheckGuide(),
     [LEARNED_EDITS_FILE]: learnedEditsStarter()
   }
 

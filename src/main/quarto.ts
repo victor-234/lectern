@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve, sep } from 'path'
 import { tmpdir } from 'os'
 import { createHash } from 'crypto'
 import { ensureExtraBib } from './extraRefs'
+import { ensureIntroCheck } from './introCheck'
 
 /**
  * A project's real work happens in one Quarto document at the project root:
@@ -115,6 +116,9 @@ export async function ensureQuartoDocs(projectPath: string): Promise<void> {
   // Materialize the project's manual-references bib and wire it into the front
   // matter (upgrades legacy scalar `bibliography:` to a list). Idempotent.
   await ensureExtraBib(projectPath)
+
+  // Projects created before the intro-check skill existed pick it up here.
+  await ensureIntroCheck(projectPath)
 }
 
 async function readConfig(projectPath: string): Promise<{ title: string; authors: string[] }> {

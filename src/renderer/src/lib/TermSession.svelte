@@ -10,6 +10,7 @@
     sid,
     cwd,
     kickoff = null,
+    cmd = 'claude',
     visible = true,
     onrunning
   }: {
@@ -17,6 +18,8 @@
     cwd: string
     // Prompt auto-typed once the TUI is up (~2.5s after boot). Null => none.
     kickoff?: string | null
+    // Shell command to boot instead of a fresh `claude` (e.g. `claude --resume …`).
+    cmd?: string
     // Whether this session's pane is the visible one — drives a refit when shown.
     visible?: boolean
     onrunning?: (running: boolean) => void
@@ -106,7 +109,7 @@
 
     // Boot Claude in this session's working directory.
     void (async () => {
-      const res = await window.api.pty.spawn({ id: sid, cwd, cmd: 'claude' })
+      const res = await window.api.pty.spawn({ id: sid, cwd, cmd })
       if (!res.ok) {
         term.write(`\r\n\x1b[31m${res.error ?? 'failed to spawn'}\x1b[0m\r\n`)
         return
